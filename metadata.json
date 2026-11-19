@@ -1,0 +1,6 @@
+{
+  "name": "The Course — A Patrons' Gathering",
+  "description": "An arrangement of taste and tone. December 19, 2026 at Entebbe Golf Club — exceptional cars, championship golf, live band, stunning fashion, high-stakes poker, and fine dining.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
