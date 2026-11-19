@@ -14,6 +14,7 @@ import {
   Ticket,
 } from 'lucide-react';
 import { EVENT_INFO, PROTEA_HOTEL_OFFER, TICKET_TIERS, formatUgx, type TicketTier } from '../data/eventData';
+import { EventCountdown, useEventCountdown } from './EventCountdown';
 
 type CheckoutStep = 'form' | 'payment' | 'confirmed';
 type PaymentMethod = 'mtn' | 'airtel' | 'card';
@@ -45,6 +46,9 @@ export function TicketFormSection() {
   const [formQrDataUrl, setFormQrDataUrl] = useState<string>('');
   const [passQrDataUrl, setPassQrDataUrl] = useState<string>('');
   const [copiedLink, setCopiedLink] = useState(false);
+
+  const eventPhase = useEventCountdown();
+  const isEventEnded = eventPhase.status === 'after';
 
   const selectedTier = useMemo(
     () => TICKET_TIERS.find((tier) => tier.id === selectedTierId) ?? TICKET_TIERS[0],
@@ -140,11 +144,13 @@ export function TicketFormSection() {
 
   const handleProceed = (e: FormEvent) => {
     e.preventDefault();
+    if (isEventEnded) return;
     if (!validateForm()) return;
     setStep('payment');
   };
 
   const handleConfirmPurchase = () => {
+    if (isEventEnded) return;
     const randomCode = Math.floor(1000 + Math.random() * 9000);
     const nextReceipt: BookingReceipt = {
       reference: `TC-2026-${randomCode}`,
@@ -209,9 +215,14 @@ export function TicketFormSection() {
           <div className="lg:col-span-7 bg-white rounded-2xl border border-[#0E3B24]/15 p-5 sm:p-7 shadow-sm">
             {step === 'form' && (
               <form onSubmit={handleProceed} noValidate className="space-y-5">
-                <div className="pb-3 border-b border-[#0E3B24]/10 flex items-center justify-between gap-4">
-                  <h3 className="text-base font-semibold text-[#0E3B24]">Patron & Pass Details</h3>
-                  <span className="font-mono text-xs text-[#0E3B24]/70 tabular-nums">Step 1 of 2</span>
+                <div className="pb-3 border-b border-[#0E3B24]/10 space-y-2.5">
+                  <div className="flex items-center justify-between gap-4">
+                    <h3 className="text-base font-semibold text-[#0E3B24]">Patron & Pass Details</h3>
+                    <span className="font-mono text-xs text-[#0E3B24]/70 tabular-nums">Step 1 of 2</span>
+                  </div>
+                  <div>
+                    <EventCountdown variant="mini" />
+                  </div>
                 </div>
 
                 <div className="space-y-3.5">
@@ -389,10 +400,15 @@ export function TicketFormSection() {
 
                   <button
                     type="submit"
-                    className="inline-flex items-center justify-center gap-2 h-11 px-6 rounded-xl bg-[#0E3B24] hover:bg-[#134d30] text-[#FAF8F3] text-sm font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0E3B24]"
+                    disabled={isEventEnded}
+                    className={`inline-flex items-center justify-center gap-2 h-11 px-6 rounded-xl text-sm font-semibold transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0E3B24] ${
+                      isEventEnded
+                        ? 'bg-[#111D15]/15 text-[#111D15]/55 cursor-not-allowed'
+                        : 'bg-[#0E3B24] hover:bg-[#134d30] text-[#FAF8F3] cursor-pointer'
+                    }`}
                   >
                     <Ticket className="w-4 h-4" aria-hidden="true" />
-                    <span>Proceed to Buy Tickets</span>
+                    <span>{isEventEnded ? 'Event Ended' : 'Proceed to Buy Tickets'}</span>
                   </button>
                 </div>
               </form>

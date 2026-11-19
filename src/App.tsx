@@ -1,5 +1,6 @@
 import { ArrowDownRight } from 'lucide-react';
 import { AccordionGallery } from './components/AccordionGallery';
+import { EventCountdown } from './components/EventCountdown';
 import { ProteaStaySection } from './components/ProteaStaySection';
 import { TeaserVideoPlayer } from './components/TeaserVideoPlayer';
 import { TicketFormSection } from './components/TicketFormSection';
@@ -59,17 +60,17 @@ export default function App() {
 
       <main id="top" className="flex-1">
         {/* Hero Section with Official Logo & Dual Video Theater Right After Header */}
-        <section id="gathering" className="py-8 sm:py-12">
+        <section id="gathering" className="pt-2 pb-8 sm:pt-3 sm:pb-12">
           <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8">
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-stretch">
               <div className="lg:col-span-7 flex flex-col justify-between gap-6">
                 <div className="space-y-4">
-                  <div className="flex items-center gap-4">
+                  <div className="flex flex-wrap items-center gap-4 sm:gap-5">
                     <img
                       src={EVENT_INFO.logoPath}
                       alt="The Course — A Patrons' Gathering official emblem"
                       referrerPolicy="no-referrer"
-                      className="w-18 h-18 sm:w-20 sm:h-20 rounded-2xl object-cover border border-[#C5A246]/40 shrink-0"
+                      className="w-28 h-28 sm:w-36 sm:h-36 lg:w-40 lg:h-40 rounded-2xl object-cover border border-[#C5A246]/45 shadow-sm shrink-0"
                     />
                     <div className="min-w-0">
                       <p className="text-xs font-medium text-[#0E3B24]/75">
@@ -83,6 +84,7 @@ export default function App() {
                         </span>
                       </p>
                     </div>
+                    <EventCountdown />
                   </div>
 
                   <h1 className="font-serif text-[clamp(2.25rem,4vw,3.5rem)] leading-[1.08] font-semibold tracking-tight text-[#0E3B24]">
