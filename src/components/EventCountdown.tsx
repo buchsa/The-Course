@@ -150,18 +150,21 @@ export function EventCountdown({ variant = 'default' }: EventCountdownProps) {
       aria-label="Countdown to 19 December 2026"
       className="sm:ml-auto bg-white rounded-xl border border-[#0E3B24]/20 shadow-sm overflow-hidden shrink-0"
     >
-      <div className="px-4 py-1.5 bg-[#0E3B24] text-center border-b border-[#C5A246]/35">
-        <p className="text-xs font-semibold text-[#E2CB7A] tracking-wide whitespace-nowrap">
+      <div className="px-3 xl:px-4 py-1 xl:py-1.5 bg-[#0E3B24] text-center border-b border-[#C5A246]/35">
+        <p className="text-[11px] xl:text-xs font-semibold text-[#E2CB7A] tracking-wide whitespace-nowrap">
           Countdown to Tee-Off
         </p>
       </div>
       <div className="grid grid-cols-4 divide-x divide-[#0E3B24]/15">
         {units.map((unit) => (
-          <div key={unit.label} className="px-3 sm:px-3.5 py-2.5 sm:py-3 text-center min-w-[58px]">
-            <span className="block font-mono tabular-nums text-xl sm:text-2xl font-bold text-[#0E3B24] leading-none">
+          <div
+            key={unit.label}
+            className="px-1.5 lg:px-2.5 xl:px-3.5 py-2 lg:py-2.5 xl:py-3 text-center min-w-[46px] lg:min-w-[54px] xl:min-w-[58px]"
+          >
+            <span className="block font-mono tabular-nums text-base sm:text-lg lg:text-xl xl:text-2xl font-bold text-[#0E3B24] leading-none">
               {unit.value}
             </span>
-            <span className="block text-[11px] font-semibold text-[#111D15]/75 mt-1.5">
+            <span className="block text-[10px] xl:text-[11px] font-semibold text-[#111D15]/75 mt-1 xl:mt-1.5">
               {unit.label}
             </span>
           </div>

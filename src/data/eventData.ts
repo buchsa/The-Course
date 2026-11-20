@@ -138,38 +138,27 @@ export const SIGNATURE_MOMENTS: SignatureMoment[] = [
   {
     index: '01',
     timeWindow: 'Morning',
-    title: 'The Roll-In',
-    description: 'Kampala convoys arrive and park directly on the greens.',
+    title: 'THE ROLL-IN',
+    description: 'Clubs and friends arrive together. The entrance itself becomes content.',
   },
   {
     index: '02',
     timeWindow: 'Midday',
-    title: 'Keys Please & Stories',
-    description: 'Bonnets up beside the parasols for owner portraits and stories.',
+    title: 'KEYS PLEASE',
+    description:
+      'Scheduled call-outs bring categories together for quick owner moments and group photographs.',
   },
   {
     index: '03',
     timeWindow: 'Afternoon',
-    title: 'Petrol RC Track & Golf',
-    description: '1:5 petrol RC oval heats, putting greens, and lawn poker.',
+    title: 'PEOPLE’S PICK',
+    description: 'One crowd-voted favourite. No complicated judging; just the car people loved most.',
   },
   {
     index: '04',
-    timeWindow: 'Golden Hour',
-    title: "People's Pick",
-    description: 'Crowd-voted favourite car on the lawn as the sun dips.',
-  },
-  {
-    index: '05',
-    timeWindow: 'Early Evening',
-    title: 'Stage Fashion Catwalk',
-    description: 'Evening runway right on the main stage before the band.',
-  },
-  {
-    index: '06',
     timeWindow: 'Nightfall',
-    title: 'Live Band & Last Lap',
-    description: 'Live band takes over from the catwalk through departure.',
+    title: 'THE LAST LAP',
+    description: 'Departure moments that close the day with stage performances, pomp, movement and energy.',
   },
 ];
 

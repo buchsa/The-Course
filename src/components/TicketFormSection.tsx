@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { EVENT_INFO, PROTEA_HOTEL_OFFER, TICKET_TIERS, formatUgx, type TicketTier } from '../data/eventData';
 import { useEventCountdown } from './EventCountdown';
+import { PartnersCarousel } from './PartnersCarousel';
 
 type CheckoutStep = 'form' | 'payment' | 'confirmed';
 type PaymentMethod = 'mtn' | 'airtel' | 'card';
@@ -628,6 +629,8 @@ export function TicketFormSection() {
                 </div>
               </div>
             </div>
+
+            <PartnersCarousel />
           </div>
         </div>
       </div>

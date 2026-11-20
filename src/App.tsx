@@ -1,10 +1,10 @@
-import { ArrowDownRight } from 'lucide-react';
+import { ArrowDownRight, BedDouble, CalendarDays, Flag, MapPin } from 'lucide-react';
 import { AccordionGallery } from './components/AccordionGallery';
 import { EventCountdown } from './components/EventCountdown';
 import { ProteaStaySection } from './components/ProteaStaySection';
 import { TeaserVideoPlayer } from './components/TeaserVideoPlayer';
 import { TicketFormSection } from './components/TicketFormSection';
-import { EVENT_INFO } from './data/eventData';
+import { EVENT_INFO, SIGNATURE_MOMENTS } from './data/eventData';
 
 export default function App() {
   return (
@@ -65,21 +65,21 @@ export default function App() {
             <div className="grid grid-cols-1 md:grid-cols-12 gap-6 lg:gap-8 items-stretch">
               <div className="md:col-span-8 lg:col-span-7 flex flex-col justify-between gap-6">
                 <div className="space-y-4">
-                  <div className="flex flex-wrap items-center gap-3 sm:gap-4 w-full max-w-[580px]">
+                  <div className="flex flex-wrap sm:flex-nowrap items-center gap-2.5 lg:gap-3 xl:gap-4 w-full max-w-[615px]">
                     <img
                       src={EVENT_INFO.logoPath}
                       alt="The Course — A Patrons' Gathering official emblem"
                       referrerPolicy="no-referrer"
-                      className="w-28 h-28 sm:w-36 sm:h-36 lg:w-40 lg:h-40 rounded-2xl object-cover border border-[#C5A246]/45 shadow-sm shrink-0"
+                      className="w-28 h-28 md:w-28 md:h-28 lg:w-36 lg:h-36 xl:w-40 xl:h-40 rounded-2xl object-cover border border-[#C5A246]/45 shadow-sm shrink-0"
                     />
-                    <div className="min-w-0">
+                    <div className="min-w-0 shrink-0">
                       <p className="text-xs font-medium text-[#0E3B24]/75">
                         <span className="block">{EVENT_INFO.dateLabel}</span>
                         <span className="block">{EVENT_INFO.venue}</span>
                       </p>
-                      <p className="font-serif text-lg sm:text-xl font-semibold text-[#0E3B24]">
+                      <p className="font-serif text-base lg:text-lg xl:text-xl font-semibold text-[#0E3B24]">
                         <span className="block">{EVENT_INFO.brand}</span>
-                        <span className="block text-sm sm:text-base font-medium italic text-[#0E3B24]/85">
+                        <span className="block text-xs lg:text-sm xl:text-base font-medium italic text-[#0E3B24]/85">
                           - {EVENT_INFO.tagline} -
                         </span>
                       </p>
@@ -129,37 +129,93 @@ export default function App() {
               </div>
             </div>
 
-            {/* Key Event Details & Dual Teaser Video Theater */}
-            <div className="mt-9 pt-7 border-t border-[#0E3B24]/15 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-              <div className="lg:col-span-7 grid grid-cols-2 gap-6">
-                <div>
-                  <p className="text-xs text-[#111D15]/60 mb-0.5">Date</p>
-                  <p className="text-sm font-semibold text-[#0E3B24]">{EVENT_INFO.dateLabel}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-[#111D15]/60 mb-0.5">Venue</p>
-                  <p className="text-sm font-semibold text-[#0E3B24]">Entebbe Golf Club Oval</p>
-                </div>
-                <div>
-                  <p className="text-xs text-[#111D15]/60 mb-0.5">On the Greens</p>
-                  <p className="text-sm font-semibold text-[#0E3B24]">
-                    Championship Golf · Exquisite Cars
-                    <br />
-                    Fashion Catwalk · Live Band · Endless Barbecue
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-[#111D15]/60 mb-0.5">Stay Privilege</p>
-                  <p className="text-sm font-semibold text-[#0E3B24]">
-                    50% Discount for Double Occupancy
-                    <br />
-                    At Protea Hotel (Marriott), Entebbe
-                  </p>
-                </div>
+            {/* Dual Teaser Video Theater (Left) & Top-Aligned Details + Height-Bound Signature Moments (Right) */}
+            <div className="mt-9 pt-7 border-t border-[#0E3B24]/15 grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch">
+              <div className="lg:col-span-5 text-left">
+                <TeaserVideoPlayer />
               </div>
 
-              <div className="lg:col-span-5">
-                <TeaserVideoPlayer />
+              <div className="lg:col-span-7 flex flex-col justify-between gap-5 text-left">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
+                  <div className="flex items-start gap-3">
+                    <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-[#0E3B24]/[0.06] border border-[#0E3B24]/15 text-[#0E3B24] shrink-0 mt-0.5">
+                      <CalendarDays className="w-4 h-4" aria-hidden="true" />
+                    </span>
+                    <div>
+                      <p className="text-xs text-[#111D15]/60 mb-0.5">Date</p>
+                      <p className="text-sm font-semibold text-[#0E3B24]">{EVENT_INFO.dateLabel}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-[#0E3B24]/[0.06] border border-[#0E3B24]/15 text-[#0E3B24] shrink-0 mt-0.5">
+                      <MapPin className="w-4 h-4" aria-hidden="true" />
+                    </span>
+                    <div>
+                      <p className="text-xs text-[#111D15]/60 mb-0.5">Venue</p>
+                      <p className="text-sm font-semibold text-[#0E3B24]">Entebbe Golf Club Oval</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-[#0E3B24]/[0.06] border border-[#0E3B24]/15 text-[#0E3B24] shrink-0 mt-0.5">
+                      <Flag className="w-4 h-4" aria-hidden="true" />
+                    </span>
+                    <div>
+                      <p className="text-xs text-[#111D15]/60 mb-0.5">On the Greens</p>
+                      <p className="text-sm font-semibold text-[#0E3B24]">
+                        Championship Golf · Exquisite Cars
+                        <br />
+                        Fashion Catwalk · Live Band · Endless Barbecue
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-[#0E3B24]/[0.06] border border-[#0E3B24]/15 text-[#0E3B24] shrink-0 mt-0.5">
+                      <BedDouble className="w-4 h-4" aria-hidden="true" />
+                    </span>
+                    <div>
+                      <p className="text-xs text-[#111D15]/60 mb-0.5">Stay Privilege</p>
+                      <p className="text-sm font-semibold text-[#0E3B24]">
+                        50% Discount for Double Occupancy
+                        <br />
+                        At Protea Hotel (Marriott), Entebbe
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Height-Bound Signature Moments Sub-Div */}
+                <div className="flex-1 bg-white rounded-2xl border border-[#0E3B24]/15 p-4 sm:p-5 shadow-sm flex flex-col justify-between gap-3.5">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-[#0E3B24]/70">
+                      Signature Moments
+                    </p>
+                    <h3 className="font-serif text-xl sm:text-2xl font-semibold tracking-tight text-[#0E3B24] mt-0.5">
+                      Things people will remember — and post.
+                    </h3>
+                    <p className="text-sm text-[#111D15]/75 mt-0.5">
+                      The simple mechanics that describe The Course.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 flex-1">
+                    {SIGNATURE_MOMENTS.map((moment) => (
+                      <div
+                        key={moment.index}
+                        className="rounded-xl bg-[#FAF8F3]/80 border border-[#0E3B24]/12 p-4 flex flex-col justify-center"
+                      >
+                        <h4 className="text-sm font-bold tracking-wide text-[#0E3B24] uppercase mb-1">
+                          {moment.title}
+                        </h4>
+                        <p className="text-xs sm:text-sm leading-relaxed text-[#111D15]/80">
+                          {moment.description}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
