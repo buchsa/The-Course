@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowDownRight, Check, ImageOff } from 'lucide-react';
+import { ArrowDownRight, BedDouble, Check, ImageOff } from 'lucide-react';
 import { PROTEA_HOTEL_OFFER } from '../data/eventData';
 
 export function ProteaStaySection() {
@@ -12,8 +12,8 @@ export function ProteaStaySection() {
   return (
     <section id="stay" className="py-12 sm:py-14 border-t border-[#0E3B24]/10 bg-[#FAF8F3]">
       <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center mb-8">
-          <div className="lg:col-span-7 space-y-2.5">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 lg:gap-8 items-center mb-8">
+          <div className="md:col-span-6 lg:col-span-7 space-y-2.5">
             <p className="text-xs font-medium tracking-wide text-[#0E3B24]/70">
               {PROTEA_HOTEL_OFFER.partnerName}
             </p>
@@ -25,15 +25,29 @@ export function ProteaStaySection() {
             </p>
           </div>
 
-          <div className="lg:col-span-5 bg-white rounded-2xl border border-[#0E3B24]/15 p-5 shadow-sm flex flex-col sm:flex-row lg:flex-col justify-between gap-4">
-            <ul className="space-y-1.5 text-sm text-[#111D15]/80">
-              {PROTEA_HOTEL_OFFER.highlights.map((item) => (
-                <li key={item} className="flex items-start gap-2">
-                  <Check className="w-4 h-4 text-[#0E3B24] mt-0.5 shrink-0" aria-hidden="true" />
-                  <span>{item}</span>
-                </li>
-              ))}
-            </ul>
+          <div className="md:col-span-6 lg:col-span-5 bg-white rounded-2xl border border-[#0E3B24]/15 p-5 shadow-sm flex flex-col justify-between gap-4">
+            <div className="flex items-start justify-between gap-4">
+              <ul className="space-y-1.5 text-sm text-[#111D15]/80">
+                {PROTEA_HOTEL_OFFER.highlights.map((item) => (
+                  <li key={item} className="flex items-start gap-2">
+                    <Check className="w-4 h-4 text-[#0E3B24] mt-0.5 shrink-0" aria-hidden="true" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+
+              <div className="flex flex-col items-end gap-1.5 shrink-0 text-right">
+                <BedDouble className="w-5 h-5 text-[#0E3B24]" aria-hidden="true" />
+                <a
+                  href="https://www.marriott.com/en-us/hotels/ebben-protea-hotel-entebbe/overview/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs font-medium text-[#0E3B24] hover:underline whitespace-nowrap"
+                >
+                  See Hotel Photos
+                </a>
+              </div>
+            </div>
 
             <a
               href="#tickets"

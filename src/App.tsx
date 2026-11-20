@@ -59,13 +59,13 @@ export default function App() {
       </header>
 
       <main id="top" className="flex-1">
-        {/* Hero Section with Official Logo & Dual Video Theater Right After Header */}
+        {/* Hero Section with Official Logo, Countdown & Extreme-Right KV Poster */}
         <section id="gathering" className="pt-2 pb-8 sm:pt-3 sm:pb-12">
           <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-stretch">
-              <div className="lg:col-span-7 flex flex-col justify-between gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-6 lg:gap-8 items-stretch">
+              <div className="md:col-span-8 lg:col-span-7 flex flex-col justify-between gap-6">
                 <div className="space-y-4">
-                  <div className="flex flex-wrap items-center gap-4 sm:gap-5">
+                  <div className="flex flex-wrap items-center gap-3 sm:gap-4 w-full max-w-[580px]">
                     <img
                       src={EVENT_INFO.logoPath}
                       alt="The Course — A Patrons' Gathering official emblem"
@@ -119,32 +119,47 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="lg:col-span-5">
-                <TeaserVideoPlayer />
+              <div className="md:col-span-4 lg:col-span-5 flex items-center justify-end">
+                <img
+                  src={EVENT_INFO.kvImagePath}
+                  alt="The Course — A Patrons' Gathering key visual poster for 19 December 2026 at Entebbe Golf Course"
+                  referrerPolicy="no-referrer"
+                  className="w-full max-w-[400px] aspect-[4/5] object-cover rounded-2xl border border-[#C5A246]/35 shadow-sm md:ml-auto"
+                />
               </div>
             </div>
 
-            {/* Compact 4-Column Key Info Strip */}
-            <div className="mt-9 pt-6 border-t border-[#0E3B24]/15 grid grid-cols-2 lg:grid-cols-4 gap-5">
-              <div>
-                <p className="text-xs text-[#111D15]/60 mb-0.5">Date</p>
-                <p className="text-sm font-semibold text-[#0E3B24]">{EVENT_INFO.dateLabel}</p>
+            {/* Key Event Details & Dual Teaser Video Theater */}
+            <div className="mt-9 pt-7 border-t border-[#0E3B24]/15 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+              <div className="lg:col-span-7 grid grid-cols-2 gap-6">
+                <div>
+                  <p className="text-xs text-[#111D15]/60 mb-0.5">Date</p>
+                  <p className="text-sm font-semibold text-[#0E3B24]">{EVENT_INFO.dateLabel}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-[#111D15]/60 mb-0.5">Venue</p>
+                  <p className="text-sm font-semibold text-[#0E3B24]">Entebbe Golf Club Oval</p>
+                </div>
+                <div>
+                  <p className="text-xs text-[#111D15]/60 mb-0.5">On the Greens</p>
+                  <p className="text-sm font-semibold text-[#0E3B24]">
+                    Championship Golf · Exquisite Cars
+                    <br />
+                    Fashion Catwalk · Live Band · Endless Barbecue
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-[#111D15]/60 mb-0.5">Stay Privilege</p>
+                  <p className="text-sm font-semibold text-[#0E3B24]">
+                    50% Discount for Double Occupancy
+                    <br />
+                    At Protea Hotel (Marriott), Entebbe
+                  </p>
+                </div>
               </div>
-              <div>
-                <p className="text-xs text-[#111D15]/60 mb-0.5">Venue</p>
-                <p className="text-sm font-semibold text-[#0E3B24]">{EVENT_INFO.venue}</p>
-              </div>
-              <div>
-                <p className="text-xs text-[#111D15]/60 mb-0.5">On the Greens</p>
-                <p className="text-sm font-semibold text-[#0E3B24]">
-                  Petrol RC Track · Catwalk · Live Band
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-[#111D15]/60 mb-0.5">Stay Privilege</p>
-                <p className="text-sm font-semibold text-[#0E3B24]">
-                  50% Off Protea Hotel Entebbe
-                </p>
+
+              <div className="lg:col-span-5">
+                <TeaserVideoPlayer />
               </div>
             </div>
           </div>

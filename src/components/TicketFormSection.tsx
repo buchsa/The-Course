@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import QRCode from 'qrcode';
 import {
   ArrowLeft,
-  BedDouble,
   Check,
   Copy,
   Download,
@@ -14,7 +13,7 @@ import {
   Ticket,
 } from 'lucide-react';
 import { EVENT_INFO, PROTEA_HOTEL_OFFER, TICKET_TIERS, formatUgx, type TicketTier } from '../data/eventData';
-import { EventCountdown, useEventCountdown } from './EventCountdown';
+import { useEventCountdown } from './EventCountdown';
 
 type CheckoutStep = 'form' | 'payment' | 'confirmed';
 type PaymentMethod = 'mtn' | 'airtel' | 'card';
@@ -215,13 +214,15 @@ export function TicketFormSection() {
           <div className="lg:col-span-7 bg-white rounded-2xl border border-[#0E3B24]/15 p-5 sm:p-7 shadow-sm">
             {step === 'form' && (
               <form onSubmit={handleProceed} noValidate className="space-y-5">
-                <div className="pb-3 border-b border-[#0E3B24]/10 space-y-2.5">
+                <div className="pb-3 border-b border-[#0E3B24]/10 space-y-1.5">
                   <div className="flex items-center justify-between gap-4">
-                    <h3 className="text-base font-semibold text-[#0E3B24]">Patron & Pass Details</h3>
+                    <h3 className="text-base font-semibold text-[#0E3B24]">Patron Pass Details</h3>
                     <span className="font-mono text-xs text-[#0E3B24]/70 tabular-nums">Step 1 of 2</span>
                   </div>
                   <div>
-                    <EventCountdown variant="mini" />
+                    <p className="text-xs sm:text-sm font-medium text-[#0E3B24]/80">
+                      Inclusive of an all day Endless Barbecue
+                    </p>
                   </div>
                 </div>
 
@@ -625,27 +626,6 @@ export function TicketFormSection() {
                     </button>
                   </div>
                 </div>
-              </div>
-            </div>
-
-            <div className="bg-[#0E3B24] text-[#FAF8F3] rounded-2xl p-5 border border-[#C5A246]/25 space-y-2.5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs font-medium text-[#E2CB7A]">Included With Every Pass</p>
-                  <h3 className="font-serif text-lg font-semibold text-white">
-                    50% Off {PROTEA_HOTEL_OFFER.partnerName}
-                  </h3>
-                </div>
-                <BedDouble className="w-5 h-5 text-[#E2CB7A] shrink-0" aria-hidden="true" />
-              </div>
-              <p className="text-xs sm:text-sm text-white/80">
-                Automatic 50% discount on a double occupancy room on Lake Victoria.
-              </p>
-              <div className="pt-2 border-t border-white/10 flex flex-wrap items-center justify-between gap-3 text-xs text-white/75">
-                <a href="#stay" className="text-[#E2CB7A] hover:underline font-medium">
-                  View Hotel Photos →
-                </a>
-                <span className="font-mono tabular-nums">{EVENT_INFO.phones.join(' · ')}</span>
               </div>
             </div>
           </div>
