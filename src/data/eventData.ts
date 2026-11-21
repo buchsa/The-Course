@@ -46,7 +46,7 @@ export const EVENT_INFO = {
   email: 'connect@autoshowkampala.com',
   hashtags: '#TheCourseUG · #APatronsGathering',
   logoPath: '/assets/aistudio/The_Course_Profile_edit_bab94824.jpeg',
-  kvImagePath: '/assets/aistudio/WhatsApp_Image_2026-11-20_at_2.35.06_PM_5494ab07.jpeg',
+  kvImagePath: '/assets/aistudio/WhatsApp_Image_2026-11-21_at_10.21.30_PM_c50ba0e2.jpeg',
   videoPath: '/assets/aistudio/WhatsApp_Video_2026-11-10_at_10.33.38_PM_7f2893e0.mp4',
   venueVideoPath: '/assets/aistudio/kling_20261113_VIDEO_Create_a_r_668_0_2_24e1e7a6.mp4',
 } as const;
