@@ -53,7 +53,7 @@ export default function App() {
             href="#tickets"
             className="inline-flex items-center justify-center h-10 px-5 rounded-lg bg-[#0E3B24] hover:bg-[#134d30] text-[#FAF8F3] text-xs font-semibold transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0E3B24]"
           >
-            Buy Passes
+            Buy Tickets
           </a>
         </div>
       </header>
@@ -106,7 +106,7 @@ export default function App() {
                     href="#tickets"
                     className="inline-flex items-center justify-center gap-2 h-11 px-6 rounded-xl bg-[#0E3B24] hover:bg-[#134d30] text-[#FAF8F3] text-sm font-semibold transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0E3B24]"
                   >
-                    <span>Buy Passes</span>
+                    <span>Buy Tickets</span>
                     <ArrowDownRight className="w-4 h-4" aria-hidden="true" />
                   </a>
 

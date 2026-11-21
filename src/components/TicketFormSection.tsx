@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import QRCode from 'qrcode';
 import {
+  AlertCircle,
   ArrowLeft,
   Check,
   Copy,
@@ -11,6 +12,7 @@ import {
   QrCode,
   ShieldCheck,
   Ticket,
+  X,
 } from 'lucide-react';
 import { EVENT_INFO, PROTEA_HOTEL_OFFER, TICKET_TIERS, formatUgx, type TicketTier } from '../data/eventData';
 import { useEventCountdown } from './EventCountdown';
@@ -46,9 +48,21 @@ export function TicketFormSection() {
   const [formQrDataUrl, setFormQrDataUrl] = useState<string>('');
   const [passQrDataUrl, setPassQrDataUrl] = useState<string>('');
   const [copiedLink, setCopiedLink] = useState(false);
+  const [showUnavailablePopup, setShowUnavailablePopup] = useState(false);
 
   const eventPhase = useEventCountdown();
   const isEventEnded = eventPhase.status === 'after';
+
+  useEffect(() => {
+    if (!showUnavailablePopup) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowUnavailablePopup(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showUnavailablePopup]);
 
   const selectedTier = useMemo(
     () => TICKET_TIERS.find((tier) => tier.id === selectedTierId) ?? TICKET_TIERS[0],
@@ -145,8 +159,8 @@ export function TicketFormSection() {
   const handleProceed = (e: FormEvent) => {
     e.preventDefault();
     if (isEventEnded) return;
-    if (!validateForm()) return;
-    setStep('payment');
+    // Temporarily paused until the payments processing integrator is connected
+    setShowUnavailablePopup(true);
   };
 
   const handleConfirmPurchase = () => {
@@ -634,6 +648,60 @@ export function TicketFormSection() {
           </div>
         </div>
       </div>
+
+      {showUnavailablePopup && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[#111D15]/55 backdrop-blur-xs p-4"
+          onClick={() => setShowUnavailablePopup(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="payment-unavailable-title"
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-2xl border border-[#0E3B24]/20 shadow-xl max-w-sm w-full p-6 space-y-4"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <span className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-[#FAF8F3] border border-[#C5A246]/40 text-[#8A6D1F] shrink-0">
+                <AlertCircle className="w-5 h-5" aria-hidden="true" />
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowUnavailablePopup(false)}
+                aria-label="Close popup"
+                className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-[#111D15]/60 hover:text-[#0E3B24] hover:bg-[#FAF8F3] transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" aria-hidden="true" />
+              </button>
+            </div>
+
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-[#111D15]/70">
+                Sorry for the inconvenience.
+              </p>
+              <h3
+                id="payment-unavailable-title"
+                className="font-serif text-lg font-semibold text-[#0E3B24]"
+              >
+                Ticket Sales System Error.
+              </h3>
+              <p className="text-sm font-medium text-[#111D15]/80">
+                Please Try Again Later
+              </p>
+            </div>
+
+            <div className="pt-1 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowUnavailablePopup(false)}
+                className="inline-flex items-center justify-center h-10 px-5 rounded-xl bg-[#0E3B24] hover:bg-[#134d30] text-[#FAF8F3] text-sm font-semibold transition-colors cursor-pointer"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
