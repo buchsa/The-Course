@@ -10,7 +10,7 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col bg-[#FAF8F3] text-[#111D15]">
       {/* Strict 3-Zone Top Bar */}
-      <header className="sticky top-0 z-40 bg-[#FAF8F3]/95 backdrop-blur-sm border-b border-[#0E3B24]/12">
+      <header className="sticky top-0 z-40 bg-[#FAF8F3]/95 backdrop-blur-sm border-b border-[#0E3B24]/12 print:hidden">
         <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-8">
           <a
             href="#top"
@@ -60,7 +60,7 @@ export default function App() {
 
       <main id="top" className="flex-1">
         {/* Hero Section with Official Logo, Countdown & Extreme-Right KV Poster */}
-        <section id="gathering" className="pt-2 pb-8 sm:pt-3 sm:pb-12">
+        <section id="gathering" className="pt-2 pb-8 sm:pt-3 sm:pb-12 print:hidden">
           <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8">
             <div className="grid grid-cols-1 md:grid-cols-12 gap-6 lg:gap-8 items-stretch">
               <div className="md:col-span-8 lg:col-span-7 flex flex-col justify-between gap-6">
@@ -222,17 +222,21 @@ export default function App() {
         </section>
 
         {/* Interactive Accordion Player Gallery */}
-        <AccordionGallery />
+        <div className="print:hidden">
+          <AccordionGallery />
+        </div>
 
         {/* Protea Hotel Entebbe 50% Double Occupancy Section (Official Hotel Photos) */}
-        <ProteaStaySection />
+        <div className="print:hidden">
+          <ProteaStaySection />
+        </div>
 
         {/* Ticket Buying Form & QR Code */}
         <TicketFormSection />
       </main>
 
       {/* Quiet Compact Footer */}
-      <footer className="bg-[#0E3B24] text-[#FAF8F3] border-t border-[#C5A246]/25">
+      <footer className="bg-[#0E3B24] text-[#FAF8F3] border-t border-[#C5A246]/25 print:hidden">
         <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-9">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-white/15">
             <div>
