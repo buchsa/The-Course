@@ -13,25 +13,25 @@ const PARTNERS: PartnerItem[] = [
     id: 'fusion-media',
     name: 'Fusion Media',
     role: 'Organiser & Production Partner',
-    logoSrc: '/assets/aistudio/fusion_logo_no_words_52628d39.jpg',
+    logoSrc: '/assets/studio/fusion_logo_no_words_52628d39.jpg',
   },
   {
     id: 'autoshow-kampala',
     name: 'The Auto Show Kampala',
     role: 'Community Partner',
-    logoSrc: '/assets/aistudio/logo_6b2fe8bd.jpg',
+    logoSrc: '/assets/studio/logo_6b2fe8bd.jpg',
   },
   {
     id: 'entebbe-club',
     name: 'Entebbe Golf Club',
     role: 'Host Venue Partner',
-    logoSrc: '/assets/aistudio/ebbclubLogo-1_d20f4266.png',
+    logoSrc: '/assets/studio/ebbclubLogo-1_d20f4266.png',
   },
   {
     id: 'protea-entebbe',
     name: 'Protea Hotel by Marriott Entebbe',
     role: 'Hospitality Partner',
-    logoSrc: '/assets/aistudio/WhatsApp_Image_2026-11-20_at_8.48.28_PM_0e48511b.jpeg',
+    logoSrc: '/assets/studio/WhatsApp_Image_2026-11-20_at_8.48.28_PM_0e48511b.jpeg',
   },
 ];
 

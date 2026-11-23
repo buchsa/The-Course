@@ -45,10 +45,10 @@ export const EVENT_INFO = {
   phones: ['0777 075 940', '0702 609 811'],
   email: 'connect@autoshowkampala.com',
   hashtags: '#TheCourseUG · #APatronsGathering',
-  logoPath: '/assets/aistudio/The_Course_Profile_edit_bab94824.jpeg',
-  kvImagePath: '/assets/aistudio/WhatsApp_Image_2026-11-21_at_10.21.30_PM_c50ba0e2.jpeg',
-  videoPath: '/assets/aistudio/WhatsApp_Video_2026-11-10_at_10.33.38_PM_7f2893e0.mp4',
-  venueVideoPath: '/assets/aistudio/kling_20261113_VIDEO_Create_a_r_668_0_2_24e1e7a6.mp4',
+  logoPath: '/assets/studio/The_Course_Profile_edit_bab94824.jpeg',
+  kvImagePath: '/assets/studio/WhatsApp_Image_2026-11-21_at_10.21.30_PM_c50ba0e2.jpeg',
+  videoPath: '/assets/studio/WhatsApp_Video_2026-11-10_at_10.33.38_PM_7f2893e0.mp4',
+  venueVideoPath: '/assets/studio/kling_20261113_VIDEO_Create_a_r_668_0_2_24e1e7a6.mp4',
 } as const;
 
 export const TICKET_TIERS: TicketTier[] = [
