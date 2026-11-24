@@ -250,11 +250,23 @@ async function callGatewayJson<T>(
     body?: unknown;
     bearerToken?: string;
   }
-): Promise<{ httpStatus: number; payload: RonfordApiEnvelope<T> }> {
+): Promise<{
+  httpStatus: number;
+  isJson: boolean;
+  payload: RonfordApiEnvelope<T>;
+  serverHeader?: string;
+  contentType?: string;
+  rawSnippet?: string;
+}> {
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
+    Accept: 'application/json, text/plain, */*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
   };
+  if (options.body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+  }
   if (options.bearerToken) {
     headers.Authorization = `Bearer ${options.bearerToken}`;
   }
@@ -273,30 +285,70 @@ async function callGatewayJson<T>(
   }
 
   const rawText = await response.text();
-  let parsed: RonfordApiEnvelope<T>;
-  try {
-    parsed = rawText ? (JSON.parse(rawText) as RonfordApiEnvelope<T>) : {};
-  } catch {
-    throw new CheckoutGatewayError(
-      `Payment gateway returned an unexpected response (HTTP ${response.status}).`,
-      502,
-      'INVALID_GATEWAY_RESPONSE'
+  let parsed: RonfordApiEnvelope<T> = {};
+  let isJson = false;
+  if (rawText) {
+    try {
+      parsed = JSON.parse(rawText) as RonfordApiEnvelope<T>;
+      isJson = true;
+    } catch {
+      isJson = false;
+    }
+  } else {
+    isJson = response.ok;
+  }
+
+  const serverHeader = response.headers.get('server') || undefined;
+  const contentType = response.headers.get('content-type') || undefined;
+  const rawSnippet =
+    !isJson && rawText
+      ? rawText
+          .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+          .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 180)
+      : undefined;
+  if (!isJson) {
+    console.error(
+      `[checkout] Non-JSON response from ${endpointPath}: HTTP ${response.status} (ct=${contentType || 'unknown'}, server=${serverHeader || 'unknown'})`
     );
   }
 
-  return { httpStatus: response.status, payload: parsed };
+  return { httpStatus: response.status, isJson, payload: parsed, serverHeader, contentType, rawSnippet };
 }
 
 async function retrieveInitData(apiBase: string): Promise<InitDataPayload> {
-  const { httpStatus, payload } = await callGatewayJson<InitDataPayload>(
+  const { httpStatus, isJson, payload, serverHeader, rawSnippet } = await callGatewayJson<InitDataPayload>(
     apiBase,
     '/test/retrieve-init-data',
     { method: 'GET' }
   );
 
-  if (httpStatus >= 400 || !payload.succeeded || !payload.data?.publicKey || !payload.data?.iv) {
+  if (!isJson || httpStatus >= 400 || !payload.succeeded || !payload.data?.publicKey || !payload.data?.iv) {
+    const isFrontDoorBlock =
+      !isJson &&
+      httpStatus === 403 &&
+      Boolean(rawSnippet?.toLowerCase().includes('the request is blocked'));
+
+    if (isFrontDoorBlock) {
+      console.error(
+        `[checkout] Azure Front Door WAF blocked gateway request (${rawSnippet}). Ensure the hosting region/IP is allowed by the payment gateway.`
+      );
+      throw new CheckoutGatewayError(
+        'The payment gateway firewall blocked the server connection (HTTP 403). Please confirm the Ronford API base URL and ensure your hosting server IP/region is allowlisted with Ronford Digital.',
+        502,
+        'GATEWAY_WAF_BLOCKED'
+      );
+    }
+
+    const extra = !isJson ? ` (HTTP ${httpStatus})` : ` (HTTP ${httpStatus})`;
     throw new CheckoutGatewayError(
-      extractApiError(payload, 'Failed to retrieve payment security initialization data.'),
+      extractApiError(
+        isJson ? payload : null,
+        `Failed to retrieve payment security initialization data${extra}.`
+      ),
       httpStatus >= 400 && httpStatus < 500 ? httpStatus : 502
     );
   }
@@ -309,7 +361,7 @@ async function generateChallenge(
   initData: InitDataPayload
 ): Promise<string> {
   const plaintext = `${config.secretKey}:${initData.iv}`;
-  const { httpStatus, payload } = await callGatewayJson<string>(
+  const { httpStatus, isJson, payload } = await callGatewayJson<string>(
     config.apiBase,
     '/test/asymmetric-encrypt',
     {
@@ -318,12 +370,12 @@ async function generateChallenge(
     }
   );
 
-  if (httpStatus < 400 && payload.succeeded && typeof payload.data === 'string' && payload.data) {
+  if (isJson && httpStatus < 400 && payload.succeeded && typeof payload.data === 'string' && payload.data) {
     return payload.data;
   }
 
   // Fallback to local RSA encryption if the helper endpoint is disabled on live environment
-  if (httpStatus === 404 || httpStatus === 405 || httpStatus === 403) {
+  if (httpStatus === 404 || httpStatus === 405 || httpStatus === 403 || !isJson) {
     return crypto
       .publicEncrypt(
         {
@@ -336,7 +388,7 @@ async function generateChallenge(
   }
 
   throw new CheckoutGatewayError(
-    extractApiError(payload, 'Failed to generate security challenge.'),
+    extractApiError(payload, `Failed to generate security challenge (HTTP ${httpStatus}).`),
     httpStatus >= 400 && httpStatus < 500 ? httpStatus : 502
   );
 }
@@ -345,7 +397,7 @@ async function generateHash(
   config: GatewayConfig,
   requestData: Record<string, unknown>
 ): Promise<string> {
-  const { httpStatus, payload } = await callGatewayJson<string>(config.apiBase, '/test/hash', {
+  const { httpStatus, isJson, payload } = await callGatewayJson<string>(config.apiBase, '/test/hash', {
     method: 'POST',
     body: {
       key: config.secretKey,
@@ -353,12 +405,12 @@ async function generateHash(
     },
   });
 
-  if (httpStatus < 400 && payload.succeeded && typeof payload.data === 'string' && payload.data) {
+  if (isJson && httpStatus < 400 && payload.succeeded && typeof payload.data === 'string' && payload.data) {
     return payload.data;
   }
 
   // Fallback per section 4.1: "{jsonString}{secretKey}" SHA-256
-  if (httpStatus === 404 || httpStatus === 405 || httpStatus === 403) {
+  if (httpStatus === 404 || httpStatus === 405 || httpStatus === 403 || !isJson) {
     return crypto
       .createHash('sha256')
       .update(`${JSON.stringify(requestData)}${config.secretKey}`, 'utf8')
@@ -366,7 +418,7 @@ async function generateHash(
   }
 
   throw new CheckoutGatewayError(
-    extractApiError(payload, 'Failed to generate request signature hash.'),
+    extractApiError(payload, `Failed to generate request signature hash (HTTP ${httpStatus}).`),
     httpStatus >= 400 && httpStatus < 500 ? httpStatus : 502
   );
 }

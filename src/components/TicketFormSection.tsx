@@ -170,18 +170,26 @@ export function TicketFormSection() {
     if (!silent) setIsCheckingStatus(true);
     try {
       const response = await fetch(`/api/checkout/status?orderId=${encodeURIComponent(orderId)}`);
-      const payload = (await response.json()) as {
+      const rawText = await response.text();
+      let payload: {
         status?: 'PENDING' | 'SUCCESS' | 'FAILED';
         statusDescription?: string;
         checkoutUrl?: string;
         expiresAtUtc?: string;
         receipt?: BookingReceipt;
         error?: string;
-      };
+      } = {};
+      if (rawText) {
+        try {
+          payload = JSON.parse(rawText) as typeof payload;
+        } catch {
+          // Non-JSON proxy/server error
+        }
+      }
 
       if (!response.ok) {
         if (!silent) {
-          setCheckoutError(payload.error || 'Could not verify payment status.');
+          setCheckoutError(payload.error || `Unable to verify payment status (HTTP ${response.status}).`);
         }
         return null;
       }
@@ -394,16 +402,29 @@ export function TicketFormSection() {
         }),
       });
 
-      const payload = (await response.json()) as {
+      const rawText = await response.text();
+      let payload: {
         orderId?: string;
         checkoutUrl?: string;
         expiresAtUtc?: string;
         amountUgx?: number;
         error?: string;
-      };
+      } = {};
+      if (rawText) {
+        try {
+          payload = JSON.parse(rawText) as typeof payload;
+        } catch {
+          // Non-JSON proxy/server response
+        }
+      }
 
       if (!response.ok || !payload.checkoutUrl || !payload.orderId) {
-        setCheckoutError(payload.error || 'Unable to start checkout session. Please try again.');
+        setCheckoutError(
+          payload.error ||
+            (!response.ok
+              ? `Checkout service returned HTTP ${response.status}. Please try again.`
+              : 'Unable to start checkout session. Please try again.')
+        );
         return;
       }
 
@@ -429,8 +450,11 @@ export function TicketFormSection() {
       if (!isEmbedded && typeof window !== 'undefined') {
         window.location.assign(payload.checkoutUrl);
       }
-    } catch {
-      setCheckoutError('Network error connecting to checkout service. Please try again.');
+    } catch (err) {
+      const detail = err instanceof Error && err.message ? ` (${err.message})` : '';
+      setCheckoutError(
+        `Unable to reach the checkout service${detail}. Please refresh the page and try again.`
+      );
     } finally {
       setIsInitializing(false);
     }
@@ -488,17 +512,25 @@ export function TicketFormSection() {
     setIsLookingUp(true);
     try {
       const response = await fetch(`/api/checkout/status?orderId=${encodeURIComponent(normalized)}`);
-      const payload = (await response.json()) as {
+      const rawText = await response.text();
+      let payload: {
         status?: 'PENDING' | 'SUCCESS' | 'FAILED';
         statusDescription?: string;
         checkoutUrl?: string;
         expiresAtUtc?: string;
         receipt?: BookingReceipt;
         error?: string;
-      };
+      } = {};
+      if (rawText) {
+        try {
+          payload = JSON.parse(rawText) as typeof payload;
+        } catch {
+          // Non-JSON response
+        }
+      }
 
       if (!response.ok) {
-        setLookupError(payload.error || 'Order reference was not found.');
+        setLookupError(payload.error || `Order reference was not found (HTTP ${response.status}).`);
         return;
       }
 
