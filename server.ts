@@ -3,6 +3,7 @@ import express, { type Request, type Response } from 'express';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   CheckoutGatewayError,
   getPublicCheckoutConfig,
@@ -233,7 +234,13 @@ async function startServer() {
     res.status(404).json({ error: 'API endpoint not found.' });
   });
 
-  const distDir = path.resolve(process.cwd(), 'dist');
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  const currentEntryFile = path.basename(fileURLToPath(import.meta.url));
+  const cwdDistDir = path.resolve(process.cwd(), 'dist');
+  const moduleDistDir = path.resolve(moduleDir, 'dist');
+  const distDir = fs.existsSync(path.join(cwdDistDir, 'index.html'))
+    ? cwdDistDir
+    : moduleDistDir;
   const distIndex = path.join(distDir, 'index.html');
   const serveStaticDist = () => {
     if (!fs.existsSync(distIndex)) {
@@ -252,7 +259,9 @@ async function startServer() {
   };
 
   const preferBuiltDist =
-    IS_PROD || (process.env.npm_lifecycle_event === 'start' && fs.existsSync(distIndex));
+    IS_PROD ||
+    currentEntryFile === 'server.js' ||
+    (process.env.npm_lifecycle_event === 'start' && fs.existsSync(distIndex));
 
   if (preferBuiltDist) {
     serveStaticDist();
