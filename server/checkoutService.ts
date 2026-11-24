@@ -81,6 +81,7 @@ export interface CreateCheckoutInput {
   quantity: number;
   paymentMethodId?: number;
   appOrigin: string;
+  backendOrigin?: string;
 }
 
 class CheckoutGatewayError extends Error {
@@ -596,6 +597,7 @@ export async function initializeTicketCheckout(input: CreateCheckoutInput): Prom
   }
 
   const origin = input.appOrigin.replace(/\/+$/, '');
+  const callbackOrigin = (input.backendOrigin || input.appOrigin).replace(/\/+$/, '');
   const encodedOrderId = encodeURIComponent(orderId);
 
   const paymentData: Record<string, unknown> = {
@@ -603,10 +605,10 @@ export async function initializeTicketCheckout(input: CreateCheckoutInput): Prom
     merchantCode,
     amount: String(totalUgx),
     currency: 'UGX',
-    successRedirectUrl: `${origin}/payment/success?orderId=${encodedOrderId}`,
-    failedRedirectUrl: `${origin}/payment/failed?orderId=${encodedOrderId}`,
-    errorRedirectUrl: `${origin}/payment/error?orderId=${encodedOrderId}`,
-    callbackUrl: `${origin}/api/checkout/callback`,
+    successRedirectUrl: `${origin}/?checkout=success&orderId=${encodedOrderId}#tickets`,
+    failedRedirectUrl: `${origin}/?checkout=failed&orderId=${encodedOrderId}#tickets`,
+    errorRedirectUrl: `${origin}/?checkout=error&orderId=${encodedOrderId}#tickets`,
+    callbackUrl: `${callbackOrigin}/api/checkout/callback`,
     paymentMethods: paymentMethodIds,
     customer: {
       email: gatewayEmail,

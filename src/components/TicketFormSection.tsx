@@ -21,6 +21,9 @@ import { EVENT_INFO, PROTEA_HOTEL_OFFER, TICKET_TIERS, formatUgx, type TicketTie
 import { useEventCountdown } from './EventCountdown';
 import { PartnersCarousel } from './PartnersCarousel';
 
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '');
+const apiUrl = (path: string) => `${API_BASE}${path}`;
+
 type CheckoutStep = 'form' | 'awaiting_payment' | 'verifying' | 'failed' | 'confirmed';
 
 interface GatewayPaymentMethod {
@@ -150,7 +153,7 @@ export function TicketFormSection() {
   // Fetch supported payment methods from backend auth config
   useEffect(() => {
     let active = true;
-    fetch('/api/checkout/config')
+    fetch(apiUrl('/api/checkout/config'))
       .then((res) => (res.ok ? res.json() : null))
       .then((data: { configured?: boolean; paymentMethods?: GatewayPaymentMethod[] } | null) => {
         if (!active || !data) return;
@@ -169,7 +172,7 @@ export function TicketFormSection() {
   const verifyOrderStatus = useCallback(async (orderId: string, silent = false) => {
     if (!silent) setIsCheckingStatus(true);
     try {
-      const response = await fetch(`/api/checkout/status?orderId=${encodeURIComponent(orderId)}`);
+      const response = await fetch(apiUrl(`/api/checkout/status?orderId=${encodeURIComponent(orderId)}`));
       const rawText = await response.text();
       let payload: {
         status?: 'PENDING' | 'SUCCESS' | 'FAILED';
@@ -201,7 +204,10 @@ export function TicketFormSection() {
         setStatusMessage(null);
         setCheckoutError(null);
         setStep('confirmed');
-        if (typeof window !== 'undefined' && window.location.pathname.startsWith('/payment/')) {
+        if (
+          typeof window !== 'undefined' &&
+          (window.location.pathname.startsWith('/payment/') || window.location.search.includes('checkout='))
+        ) {
           window.history.replaceState({}, '', '/#tickets');
         }
         return 'SUCCESS';
@@ -210,7 +216,10 @@ export function TicketFormSection() {
       if (payload.status === 'FAILED') {
         setStatusMessage(payload.statusDescription || 'Payment was not completed.');
         setStep('failed');
-        if (typeof window !== 'undefined' && window.location.pathname.startsWith('/payment/')) {
+        if (
+          typeof window !== 'undefined' &&
+          (window.location.pathname.startsWith('/payment/') || window.location.search.includes('checkout='))
+        ) {
           window.history.replaceState({}, '', '/#tickets');
         }
         return 'FAILED';
@@ -244,14 +253,17 @@ export function TicketFormSection() {
     }
   }, []);
 
-  // Handle redirect return from Ronford Checkout Page (/payment/success|failed|error?orderId=...)
+  // Handle redirect return from Ronford Checkout Page (?checkout=success|failed|error&orderId=... or /payment/...)
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const { pathname, search } = window.location;
-    if (!pathname.startsWith('/payment/')) return;
-
     const params = new URLSearchParams(search);
-    const returnedOrderId = params.get('orderId')?.trim() || '';
+    const checkoutParam = params.get('checkout')?.trim().toLowerCase() || '';
+    const isPaymentPath = pathname.startsWith('/payment/');
+    const isCheckoutReturn = isPaymentPath || checkoutParam === 'success' || checkoutParam === 'failed' || checkoutParam === 'error';
+    if (!isCheckoutReturn) return;
+
+    const returnedOrderId = params.get('orderId')?.trim().toUpperCase() || '';
     const ticketsEl = document.getElementById('tickets');
     if (ticketsEl) {
       ticketsEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -267,7 +279,12 @@ export function TicketFormSection() {
     setStep('verifying');
     void verifyOrderStatus(returnedOrderId).then((result) => {
       if (result === 'PENDING') {
-        if (pathname.includes('/failed') || pathname.includes('/error')) {
+        if (
+          pathname.includes('/failed') ||
+          pathname.includes('/error') ||
+          checkoutParam === 'failed' ||
+          checkoutParam === 'error'
+        ) {
           setStatusMessage('Payment was cancelled or could not be confirmed yet.');
           setStep('failed');
         } else {
@@ -388,7 +405,7 @@ export function TicketFormSection() {
     setIsInitializing(true);
 
     try {
-      const response = await fetch('/api/checkout/init', {
+      const response = await fetch(apiUrl('/api/checkout/init'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -419,12 +436,13 @@ export function TicketFormSection() {
       }
 
       if (!response.ok || !payload.checkoutUrl || !payload.orderId) {
-        setCheckoutError(
-          payload.error ||
-            (!response.ok
+        const fallbackError =
+          response.status === 404
+            ? 'Checkout backend route (/api/checkout/init) was not found (HTTP 404). Ensure the app is running with the full-stack server or has been republished.'
+            : !response.ok
               ? `Checkout service returned HTTP ${response.status}. Please try again.`
-              : 'Unable to start checkout session. Please try again.')
-        );
+              : 'Unable to start checkout session. Please try again.';
+        setCheckoutError(payload.error || fallbackError);
         return;
       }
 
@@ -469,7 +487,10 @@ export function TicketFormSection() {
     setStatusMessage(null);
     setQuantity(1);
     setErrors({});
-    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/payment/')) {
+    if (
+      typeof window !== 'undefined' &&
+      (window.location.pathname.startsWith('/payment/') || window.location.search.includes('checkout='))
+    ) {
       window.history.replaceState({}, '', '/#tickets');
     }
   };
@@ -511,7 +532,7 @@ export function TicketFormSection() {
     setLookupError(null);
     setIsLookingUp(true);
     try {
-      const response = await fetch(`/api/checkout/status?orderId=${encodeURIComponent(normalized)}`);
+      const response = await fetch(apiUrl(`/api/checkout/status?orderId=${encodeURIComponent(normalized)}`));
       const rawText = await response.text();
       let payload: {
         status?: 'PENDING' | 'SUCCESS' | 'FAILED';

@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express, { type Request, type Response } from 'express';
+import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import {
@@ -14,23 +15,54 @@ import {
 const PORT = Number(process.env.PORT) || 3000;
 const IS_PROD = process.env.NODE_ENV === 'production';
 
-function resolveAppOrigin(req: Request): string {
-  const configuredAppUrl = (process.env.APP_URL || '').trim();
-  if (configuredAppUrl && configuredAppUrl !== 'MY_APP_URL') {
+function getAllowedOrigins(): Set<string> {
+  const origins = new Set<string>([
+    'https://thecourse.autoshowkampala.com',
+    'https://www.thecourse.autoshowkampala.com',
+  ]);
+
+  const candidates = [
+    process.env.APP_URL || '',
+    ...(process.env.ALLOWED_ORIGINS || '').split(','),
+  ];
+
+  for (const raw of candidates) {
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
     try {
-      const parsed = new URL(configuredAppUrl);
+      const parsed = new URL(trimmed);
       if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
-        return parsed.origin;
+        origins.add(parsed.origin);
       }
     } catch {
-      // Fallback to request headers below
+      // Ignore malformed origin entries
     }
   }
 
+  return origins;
+}
+
+function resolveServerOrigin(req: Request): string {
   const forwardedProto = req.get('x-forwarded-proto')?.split(',')[0]?.trim().toLowerCase();
   const rawProto = forwardedProto || req.protocol || 'http';
   const safeProto = rawProto === 'https' ? 'https' : 'http';
   const host = req.get('x-forwarded-host')?.split(',')[0]?.trim() || req.get('host');
+
+  const configuredAppUrl = (process.env.APP_URL || '').trim();
+  if (configuredAppUrl) {
+    try {
+      const parsedAppUrl = new URL(configuredAppUrl);
+      if (
+        (parsedAppUrl.protocol === 'https:' || parsedAppUrl.protocol === 'http:') &&
+        (!host || parsedAppUrl.host.toLowerCase() === host.toLowerCase())
+      ) {
+        return parsedAppUrl.origin;
+      }
+    } catch {
+      // Ignore malformed APP_URL
+    }
+  }
+
   if (host) {
     try {
       return new URL(`${safeProto}://${host}`).origin;
@@ -40,6 +72,27 @@ function resolveAppOrigin(req: Request): string {
   }
 
   return `http://localhost:${PORT}`;
+}
+
+function resolveFrontendOrigin(req: Request): string {
+  const requestOrigin = req.get('origin')?.trim();
+  if (requestOrigin && getAllowedOrigins().has(requestOrigin)) {
+    return requestOrigin;
+  }
+
+  const configuredAppUrl = (process.env.APP_URL || '').trim();
+  if (configuredAppUrl) {
+    try {
+      const parsed = new URL(configuredAppUrl);
+      if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+        return parsed.origin;
+      }
+    } catch {
+      // Fallback below
+    }
+  }
+
+  return resolveServerOrigin(req);
 }
 
 function sendErrorResponse(res: Response, error: unknown, fallbackMessage: string) {
@@ -62,6 +115,22 @@ async function startServer() {
   app.disable('x-powered-by');
   app.use(express.json({ limit: '64kb' }));
   app.use(express.urlencoded({ extended: false, limit: '64kb' }));
+
+  app.use('/api', (req, res, next) => {
+    const requestOrigin = req.get('origin')?.trim();
+    if (requestOrigin && getAllowedOrigins().has(requestOrigin)) {
+      res.setHeader('Access-Control-Allow-Origin', requestOrigin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    }
+
+    if (req.method === 'OPTIONS') {
+      res.status(204).end();
+      return;
+    }
+    next();
+  });
 
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true });
@@ -108,7 +177,8 @@ async function startServer() {
         tierId,
         quantity,
         paymentMethodId,
-        appOrigin: resolveAppOrigin(req),
+        appOrigin: resolveFrontendOrigin(req),
+        backendOrigin: resolveServerOrigin(req),
       });
 
       res.json(result);
@@ -154,27 +224,56 @@ async function startServer() {
           ? req.body.orderId.trim().toUpperCase()
           : '';
     const safeOrderId = /^TC-2026-[A-Z0-9]{4,12}$/.test(rawOrderId)
-      ? `?orderId=${encodeURIComponent(rawOrderId)}`
+      ? `&orderId=${encodeURIComponent(rawOrderId)}`
       : '';
-    res.redirect(303, `/payment/${outcome}${safeOrderId}`);
+    res.redirect(303, `/?checkout=${outcome}${safeOrderId}#tickets`);
   });
 
-  if (!IS_PROD) {
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: {
-        middlewareMode: true,
-        ws: { server: httpServer },
-      },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distDir = path.resolve(process.cwd(), 'dist');
+  app.all('/api/*', (_req, res) => {
+    res.status(404).json({ error: 'API endpoint not found.' });
+  });
+
+  const distDir = path.resolve(process.cwd(), 'dist');
+  const distIndex = path.join(distDir, 'index.html');
+  const serveStaticDist = () => {
+    if (!fs.existsSync(distIndex)) {
+      app.get('*', (_req, res) => {
+        res
+          .status(503)
+          .send('Frontend build not found. Run "npm run build" before starting the server.');
+      });
+      return;
+    }
+
     app.use(express.static(distDir));
     app.get('*', (_req, res) => {
-      res.sendFile(path.join(distDir, 'index.html'));
+      res.sendFile(distIndex);
     });
+  };
+
+  const preferBuiltDist =
+    IS_PROD || (process.env.npm_lifecycle_event === 'start' && fs.existsSync(distIndex));
+
+  if (preferBuiltDist) {
+    serveStaticDist();
+  } else {
+    try {
+      const { createServer: createViteServer } = await import('vite');
+      const vite = await createViteServer({
+        server: {
+          middlewareMode: true,
+          ws: { server: httpServer },
+        },
+        appType: 'spa',
+      });
+      app.use(vite.middlewares);
+    } catch (error) {
+      if (fs.existsSync(distIndex)) {
+        serveStaticDist();
+      } else {
+        throw error;
+      }
+    }
   }
 
   httpServer.listen(PORT, '0.0.0.0', () => {
