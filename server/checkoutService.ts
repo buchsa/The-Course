@@ -101,7 +101,6 @@ interface GatewayConfig {
   apiBase: string;
   merchantKey: string;
   secretKey: string;
-  merchantCodeOverride?: string;
 }
 
 const REQUEST_TIMEOUT_MS = 20_000;
@@ -205,11 +204,6 @@ function getGatewayConfig(): GatewayConfig {
     process.env.SECRET_KEY ||
     ''
   ).trim();
-  const merchantCodeOverride = (
-    process.env.RONFORD_MERCHANT_CODE ||
-    process.env.CHECKOUT_MERCHANT_CODE ||
-    ''
-  ).trim();
 
   if (!rawUrl || !merchantKey || !secretKey) {
     throw new CheckoutGatewayError(
@@ -223,7 +217,6 @@ function getGatewayConfig(): GatewayConfig {
     apiBase: normalizeApiBase(rawUrl),
     merchantKey,
     secretKey,
-    merchantCodeOverride: merchantCodeOverride || undefined,
   };
 }
 
@@ -528,10 +521,7 @@ export async function initializeTicketCheckout(input: CreateCheckoutInput): Prom
 
   let session = await authenticateMerchant(config);
 
-  const merchantCode =
-    config.merchantCodeOverride ||
-    session.merchantCodes?.[0]?.code ||
-    '000001';
+  const merchantCode = session.merchantCodes?.[0]?.code || '000001';
 
   const supportedMethods = Array.isArray(session.paymentMethods) ? session.paymentMethods : [];
   let paymentMethodIds: number[];
