@@ -99,7 +99,9 @@ class CheckoutGatewayError extends Error {
 export { CheckoutGatewayError };
 
 interface GatewayConfig {
+  rawUrl: string;
   apiBase: string;
+  candidateBases: string[];
   merchantKey: string;
   secretKey: string;
 }
@@ -111,6 +113,7 @@ const ORDERS_FILE_PATH = path.join(ORDERS_DATA_DIR, 'orders.json');
 
 let cachedAuthSession: AuthSession | null = null;
 let inFlightAuthPromise: Promise<AuthSession> | null = null;
+let resolvedApiBaseCache: { rawUrl: string; apiBase: string } | null = null;
 
 const ordersById = new Map<string, OrderRecord>();
 const orderIdByCheckoutRef = new Map<string, string>();
@@ -164,14 +167,21 @@ function normalizePemPublicKey(rawKey: string): string {
   return `-----BEGIN PUBLIC KEY-----\n${lines.join('\n')}\n-----END PUBLIC KEY-----`;
 }
 
-function normalizeApiBase(rawUrl: string): string {
+function resolveCandidateApiBases(rawUrl: string): string[] {
   const parsed = new URL(rawUrl.trim());
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
     throw new CheckoutGatewayError('Checkout base URL must use HTTP or HTTPS.', 500, 'INVALID_BASE_URL');
   }
   const cleanPath = parsed.pathname.replace(/\/+$/, '');
-  const basePath = cleanPath.endsWith('/api/v1') ? cleanPath : `${cleanPath}/api/v1`;
-  return `${parsed.origin}${basePath}`;
+  const directBase = `${parsed.origin}${cleanPath}`;
+  if (cleanPath.endsWith('/api/v1')) {
+    return [directBase];
+  }
+
+  const v1Base = `${parsed.origin}${cleanPath}/api/v1`;
+  // Base URLs that already include a gateway/APIM subpath (e.g. /prod/SPG-Merchant-Checkout-Api)
+  // often map directly without /api/v1, whereas bare hosts follow {base-url}/api/v1.
+  return cleanPath ? [directBase, v1Base] : [v1Base, directBase];
 }
 
 export function isCheckoutConfigured(): boolean {
@@ -214,8 +224,16 @@ function getGatewayConfig(): GatewayConfig {
     );
   }
 
+  const candidateBases = resolveCandidateApiBases(rawUrl);
+  const cachedBase =
+    resolvedApiBaseCache && resolvedApiBaseCache.rawUrl === rawUrl && candidateBases.includes(resolvedApiBaseCache.apiBase)
+      ? resolvedApiBaseCache.apiBase
+      : candidateBases[0];
+
   return {
-    apiBase: normalizeApiBase(rawUrl),
+    rawUrl,
+    apiBase: cachedBase,
+    candidateBases,
     merchantKey,
     secretKey,
   };
@@ -262,12 +280,10 @@ async function callGatewayJson<T>(
   const headers: Record<string, string> = {
     Accept: 'application/json, text/plain, */*',
     'Accept-Language': 'en-US,en;q=0.9',
+    'Content-Type': 'application/json',
     'User-Agent':
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
   };
-  if (options.body !== undefined) {
-    headers['Content-Type'] = 'application/json';
-  }
   if (options.bearerToken) {
     headers.Authorization = `Bearer ${options.bearerToken}`;
   }
@@ -313,21 +329,31 @@ async function callGatewayJson<T>(
       : undefined;
   if (!isJson) {
     console.error(
-      `[checkout] Non-JSON response from ${endpointPath}: HTTP ${response.status} (ct=${contentType || 'unknown'}, server=${serverHeader || 'unknown'})`
+      `[checkout] Non-JSON response from ${apiBase}${endpointPath}: HTTP ${response.status} (ct=${contentType || 'unknown'}, server=${serverHeader || 'unknown'})${rawSnippet ? ` snippet="${rawSnippet}"` : ''}`
     );
   }
 
   return { httpStatus: response.status, isJson, payload: parsed, serverHeader, contentType, rawSnippet };
 }
 
-async function retrieveInitData(apiBase: string): Promise<InitDataPayload> {
-  const { httpStatus, isJson, payload, serverHeader, rawSnippet } = await callGatewayJson<InitDataPayload>(
-    apiBase,
-    '/test/retrieve-init-data',
-    { method: 'GET' }
-  );
+async function retrieveInitData(config: GatewayConfig): Promise<InitDataPayload> {
+  const candidates = Array.from(new Set([config.apiBase, ...config.candidateBases]));
+  let lastError: CheckoutGatewayError | null = null;
 
-  if (!isJson || httpStatus >= 400 || !payload.succeeded || !payload.data?.publicKey || !payload.data?.iv) {
+  for (let i = 0; i < candidates.length; i += 1) {
+    const candidateBase = candidates[i];
+    const { httpStatus, isJson, payload, rawSnippet } = await callGatewayJson<InitDataPayload>(
+      candidateBase,
+      '/test/retrieve-init-data',
+      { method: 'GET' }
+    );
+
+    if (isJson && httpStatus < 400 && payload.succeeded && payload.data?.publicKey && payload.data?.iv) {
+      config.apiBase = candidateBase;
+      resolvedApiBaseCache = { rawUrl: config.rawUrl, apiBase: candidateBase };
+      return payload.data;
+    }
+
     const isFrontDoorBlock =
       !isJson &&
       httpStatus === 403 &&
@@ -335,7 +361,7 @@ async function retrieveInitData(apiBase: string): Promise<InitDataPayload> {
 
     if (isFrontDoorBlock) {
       console.error(
-        `[checkout] Azure Front Door WAF blocked gateway request (${rawSnippet}). Ensure the hosting region/IP is allowed by the payment gateway.`
+        `[checkout] Azure Front Door WAF blocked gateway request to ${candidateBase}/test/retrieve-init-data (${rawSnippet}). Ensure the hosting region/IP is allowed by the payment gateway.`
       );
       throw new CheckoutGatewayError(
         'The payment gateway firewall blocked the server connection (HTTP 403). Please confirm the Ronford API base URL and ensure your hosting server IP/region is allowlisted with Ronford Digital.',
@@ -344,17 +370,26 @@ async function retrieveInitData(apiBase: string): Promise<InitDataPayload> {
       );
     }
 
-    const extra = !isJson ? ` (HTTP ${httpStatus})` : ` (HTTP ${httpStatus})`;
-    throw new CheckoutGatewayError(
+    lastError = new CheckoutGatewayError(
       extractApiError(
         isJson ? payload : null,
-        `Failed to retrieve payment security initialization data${extra}.`
+        `Failed to retrieve payment security initialization data (HTTP ${httpStatus}).`
       ),
       httpStatus >= 400 && httpStatus < 500 ? httpStatus : 502
     );
+
+    // If a candidate base returned 404 and we have another prefix candidate (with/without /api/v1), try it
+    if (httpStatus === 404 && i < candidates.length - 1) {
+      continue;
+    }
+
+    throw lastError;
   }
 
-  return payload.data;
+  throw (
+    lastError ||
+    new CheckoutGatewayError('Failed to retrieve payment security initialization data.', 502)
+  );
 }
 
 async function generateChallenge(
@@ -441,7 +476,7 @@ async function authenticateMerchant(config: GatewayConfig, forceRefresh = false)
   }
 
   inFlightAuthPromise = (async () => {
-    const initData = await retrieveInitData(config.apiBase);
+    const initData = await retrieveInitData(config);
     const authData = {
       merchantKey: config.merchantKey,
       timestamp: new Date().toISOString(),
@@ -488,7 +523,7 @@ async function buildSignedSecurityFields(
   config: GatewayConfig,
   requestData: Record<string, unknown>
 ): Promise<{ hash: string; challenge: string }> {
-  const initData = await retrieveInitData(config.apiBase);
+  const initData = await retrieveInitData(config);
   const [challenge, hash] = await Promise.all([
     generateChallenge(config, initData),
     generateHash(config, requestData),
