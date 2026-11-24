@@ -236,13 +236,32 @@ async function startServer() {
 
   const moduleDir = path.dirname(fileURLToPath(import.meta.url));
   const currentEntryFile = path.basename(fileURLToPath(import.meta.url));
+  const projectRoot = fs.existsSync(path.join(process.cwd(), 'index.html'))
+    ? process.cwd()
+    : moduleDir;
   const cwdDistDir = path.resolve(process.cwd(), 'dist');
   const moduleDistDir = path.resolve(moduleDir, 'dist');
   const distDir = fs.existsSync(path.join(cwdDistDir, 'index.html'))
     ? cwdDistDir
-    : moduleDistDir;
+    : fs.existsSync(path.join(moduleDistDir, 'index.html'))
+      ? moduleDistDir
+      : path.resolve(projectRoot, 'dist');
   const distIndex = path.join(distDir, 'index.html');
-  const serveStaticDist = () => {
+
+  const serveStaticDist = async () => {
+    if (!fs.existsSync(distIndex)) {
+      try {
+        console.log('Frontend dist/ not found; building frontend bundle via Vite...');
+        const { build } = await import('vite');
+        await build({
+          root: projectRoot,
+          build: { outDir: distDir },
+        });
+      } catch (buildError) {
+        console.error('Automatic Vite build failed:', buildError);
+      }
+    }
+
     if (!fs.existsSync(distIndex)) {
       app.get('*', (_req, res) => {
         res
@@ -264,7 +283,7 @@ async function startServer() {
     (process.env.npm_lifecycle_event === 'start' && fs.existsSync(distIndex));
 
   if (preferBuiltDist) {
-    serveStaticDist();
+    await serveStaticDist();
   } else {
     try {
       const { createServer: createViteServer } = await import('vite');
@@ -278,7 +297,7 @@ async function startServer() {
       app.use(vite.middlewares);
     } catch (error) {
       if (fs.existsSync(distIndex)) {
-        serveStaticDist();
+        await serveStaticDist();
       } else {
         throw error;
       }
