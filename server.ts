@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express, { type Request, type Response } from 'express';
 import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -241,24 +242,40 @@ async function startServer() {
     : moduleDir;
   const cwdDistDir = path.resolve(process.cwd(), 'dist');
   const moduleDistDir = path.resolve(moduleDir, 'dist');
-  const distDir = fs.existsSync(path.join(cwdDistDir, 'index.html'))
-    ? cwdDistDir
-    : fs.existsSync(path.join(moduleDistDir, 'index.html'))
-      ? moduleDistDir
-      : path.resolve(projectRoot, 'dist');
-  const distIndex = path.join(distDir, 'index.html');
+  const projectDistDir = path.resolve(projectRoot, 'dist');
+  const tmpDistDir = path.join(os.tmpdir(), 'the-course-dist');
+
+  const findExistingDistDir = (): string | null => {
+    for (const candidate of [cwdDistDir, moduleDistDir, projectDistDir, tmpDistDir]) {
+      if (fs.existsSync(path.join(candidate, 'index.html'))) {
+        return candidate;
+      }
+    }
+    return null;
+  };
+
+  let distDir = findExistingDistDir() || projectDistDir;
+  let distIndex = path.join(distDir, 'index.html');
 
   const serveStaticDist = async () => {
     if (!fs.existsSync(distIndex)) {
-      try {
-        console.log('Frontend dist/ not found; building frontend bundle via Vite...');
-        const { build } = await import('vite');
-        await build({
-          root: projectRoot,
-          build: { outDir: distDir },
-        });
-      } catch (buildError) {
-        console.error('Automatic Vite build failed:', buildError);
+      const candidateTargets = [projectDistDir, tmpDistDir];
+      for (const targetOutDir of candidateTargets) {
+        try {
+          console.log(`Frontend dist/ not found; building frontend bundle into ${targetOutDir}...`);
+          const { build } = await import('vite');
+          await build({
+            root: projectRoot,
+            build: { outDir: targetOutDir },
+          });
+          if (fs.existsSync(path.join(targetOutDir, 'index.html'))) {
+            distDir = targetOutDir;
+            distIndex = path.join(targetOutDir, 'index.html');
+            break;
+          }
+        } catch (buildError) {
+          console.error(`Automatic Vite build into ${targetOutDir} failed:`, buildError);
+        }
       }
     }
 

@@ -2,27 +2,34 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import fs from 'fs';
 import path from 'path';
+import {fileURLToPath} from 'url';
 import {defineConfig} from 'vite';
 
+const configDir = path.dirname(fileURLToPath(import.meta.url));
+
 export default defineConfig(() => {
+  let resolvedOutDir = path.resolve(configDir, 'dist');
+
   return {
     plugins: [
       react(),
       tailwindcss(),
-      // Copies src/assets into dist/ so root-relative URLs like
+      // Copies src/assets into outDir so root-relative URLs like
       // "/src/assets/images/..." (e.g. generate_image output) still resolve
       // in production builds. Do not remove.
       {
         name: 'copy-unbundled-src-assets',
         apply: 'build',
+        configResolved(config): void {
+          resolvedOutDir = path.resolve(config.root, config.build.outDir);
+        },
         closeBundle(error?: Error): void {
           if (error) {
             return;
           }
-          const distDir = path.resolve(__dirname, 'dist');
-          const srcAssets = path.resolve(__dirname, 'src/assets');
-          const distAssets = path.resolve(distDir, 'src/assets');
-          if (fs.existsSync(distDir) && fs.existsSync(srcAssets)) {
+          const srcAssets = path.resolve(configDir, 'src/assets');
+          const distAssets = path.resolve(resolvedOutDir, 'src/assets');
+          if (fs.existsSync(resolvedOutDir) && fs.existsSync(srcAssets)) {
             fs.cpSync(srcAssets, distAssets, {recursive: true, force: true});
           }
         },
@@ -30,7 +37,7 @@ export default defineConfig(() => {
     ],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(configDir, '.'),
       },
     },
     server: {
