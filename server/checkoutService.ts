@@ -102,6 +102,7 @@ interface GatewayConfig {
   apiBase: string;
   merchantKey: string;
   secretKey: string;
+  subscriptionKey?: string;
 }
 
 const REQUEST_TIMEOUT_MS = 20_000;
@@ -205,6 +206,12 @@ function getGatewayConfig(): GatewayConfig {
     process.env.SECRET_KEY ||
     ''
   ).trim();
+  const subscriptionKey = (
+    process.env.RONFORD_SUBSCRIPTION_KEY ||
+    process.env.CHECKOUT_SUBSCRIPTION_KEY ||
+    process.env.OCP_APIM_SUBSCRIPTION_KEY ||
+    ''
+  ).trim();
 
   if (!rawUrl || !merchantKey || !secretKey) {
     throw new CheckoutGatewayError(
@@ -218,6 +225,7 @@ function getGatewayConfig(): GatewayConfig {
     apiBase: normalizeApiBase(rawUrl),
     merchantKey,
     secretKey,
+    subscriptionKey: subscriptionKey || undefined,
   };
 }
 
@@ -250,6 +258,7 @@ async function callGatewayJson<T>(
     method: 'GET' | 'POST';
     body?: unknown;
     bearerToken?: string;
+    subscriptionKey?: string;
   }
 ): Promise<{
   httpStatus: number;
@@ -260,11 +269,14 @@ async function callGatewayJson<T>(
   rawSnippet?: string;
 }> {
   const headers: Record<string, string> = {
-    Accept: 'application/json, text/plain, */*',
+    Accept: 'application/json',
     'Accept-Language': 'en-US,en;q=0.9',
     'User-Agent':
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
   };
+  if (options.subscriptionKey) {
+    headers['Ocp-Apim-Subscription-Key'] = options.subscriptionKey;
+  }
   if (options.body !== undefined) {
     headers['Content-Type'] = 'application/json';
   }
@@ -320,11 +332,11 @@ async function callGatewayJson<T>(
   return { httpStatus: response.status, isJson, payload: parsed, serverHeader, contentType, rawSnippet };
 }
 
-async function retrieveInitData(apiBase: string): Promise<InitDataPayload> {
-  const { httpStatus, isJson, payload, serverHeader, rawSnippet } = await callGatewayJson<InitDataPayload>(
+async function retrieveInitData(apiBase: string, subscriptionKey?: string): Promise<InitDataPayload> {
+  const { httpStatus, isJson, payload, rawSnippet } = await callGatewayJson<InitDataPayload>(
     apiBase,
     '/test/retrieve-init-data',
-    { method: 'GET' }
+    { method: 'GET', subscriptionKey }
   );
 
   if (!isJson || httpStatus >= 400 || !payload.succeeded || !payload.data?.publicKey || !payload.data?.iv) {
@@ -368,6 +380,7 @@ async function generateChallenge(
     {
       method: 'POST',
       body: plaintext,
+      subscriptionKey: config.subscriptionKey,
     }
   );
 
@@ -404,6 +417,7 @@ async function generateHash(
       key: config.secretKey,
       data: requestData,
     },
+    subscriptionKey: config.subscriptionKey,
   });
 
   if (isJson && httpStatus < 400 && payload.succeeded && typeof payload.data === 'string' && payload.data) {
@@ -441,7 +455,7 @@ async function authenticateMerchant(config: GatewayConfig, forceRefresh = false)
   }
 
   inFlightAuthPromise = (async () => {
-    const initData = await retrieveInitData(config.apiBase);
+    const initData = await retrieveInitData(config.apiBase, config.subscriptionKey);
     const authData = {
       merchantKey: config.merchantKey,
       timestamp: new Date().toISOString(),
@@ -462,6 +476,7 @@ async function authenticateMerchant(config: GatewayConfig, forceRefresh = false)
           hash,
           challenge,
         },
+        subscriptionKey: config.subscriptionKey,
       }
     );
 
@@ -488,7 +503,7 @@ async function buildSignedSecurityFields(
   config: GatewayConfig,
   requestData: Record<string, unknown>
 ): Promise<{ hash: string; challenge: string }> {
-  const initData = await retrieveInitData(config.apiBase);
+  const initData = await retrieveInitData(config.apiBase, config.subscriptionKey);
   const [challenge, hash] = await Promise.all([
     generateChallenge(config, initData),
     generateHash(config, requestData),
@@ -638,6 +653,7 @@ export async function initializeTicketCheckout(input: CreateCheckoutInput): Prom
       {
         method: 'POST',
         bearerToken: token,
+        subscriptionKey: config.subscriptionKey,
         body: {
           data: paymentData,
           hash: security.hash,
@@ -746,6 +762,7 @@ export async function queryAndSyncOrderStatus(orderId: string): Promise<OrderRec
       {
         method: 'POST',
         bearerToken: token,
+        subscriptionKey: config.subscriptionKey,
         body: {
           data: queryData,
           hash: security.hash,
