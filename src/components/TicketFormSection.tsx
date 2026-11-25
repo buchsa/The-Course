@@ -328,7 +328,7 @@ export function TicketFormSection() {
   }, [ticketFormUrl]);
 
   useEffect(() => {
-    if (!receipt || step !== 'confirmed' || !(receipt.bankRef || receipt.externalRef)) {
+    if (!receipt || step !== 'confirmed' || !receipt.bankRef) {
       setPassQrDataUrl('');
       return;
     }
@@ -1145,9 +1145,9 @@ export function TicketFormSection() {
                     <p className="font-mono tabular-nums font-semibold text-[#0E3B24] pt-1 border-t border-[#0E3B24]/10">
                       Paid ({receipt.paymentMethod}): {formatUgx(receipt.totalUgx)}
                     </p>
-                    {(receipt.bankRef || receipt.externalRef) && (
+                    {receipt.bankRef && (
                       <p className="font-mono tabular-nums text-xs text-[#111D15]/65">
-                        Ref: {receipt.externalRef || receipt.bankRef}
+                        Ref: {receipt.bankRef}
                         {formatUtcTime(receipt.valueDate) ? ` · ${formatUtcTime(receipt.valueDate)}` : ''}
                       </p>
                     )}

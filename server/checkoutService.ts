@@ -736,6 +736,25 @@ interface QueryStatusResponseData {
   credit?: PaymentCreditDetails;
 }
 
+function isValidBankRef(bankRef: string | undefined, checkoutRef: string): boolean {
+  if (typeof bankRef !== 'string') return false;
+  const trimmed = bankRef.trim();
+  if (!trimmed) return false;
+  const normalized = trimmed.toUpperCase();
+  if (normalized === checkoutRef.trim().toUpperCase()) return false;
+  if (
+    normalized === 'N/A' ||
+    normalized === 'NA' ||
+    normalized === 'NONE' ||
+    normalized === 'NULL' ||
+    normalized === '-' ||
+    normalized === '0'
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export async function queryAndSyncOrderStatus(orderId: string): Promise<OrderRecord> {
   const order = ordersById.get(orderId);
   if (!order) {
@@ -747,7 +766,7 @@ export async function queryAndSyncOrderStatus(orderId: string): Promise<OrderRec
     order.passCode &&
     order.hotelVoucherCode &&
     order.credit &&
-    (order.credit.bankRef || order.credit.externalRef)
+    isValidBankRef(order.credit.bankRef, order.checkoutRef)
   ) {
     return order;
   }
@@ -806,16 +825,34 @@ export async function queryAndSyncOrderStatus(orderId: string): Promise<OrderRec
     typeof credit?.currency === 'string' ? credit.currency.trim().toUpperCase() : '';
   const bankRef = typeof credit?.bankRef === 'string' ? credit.bankRef.trim() : '';
   const externalRef = typeof credit?.externalRef === 'string' ? credit.externalRef.trim() : '';
-  const hasGatewayRef = Boolean(bankRef || externalRef);
+  const hasValidBankRef = isValidBankRef(bankRef, order.checkoutRef);
 
   console.info(
-    `[checkout] query-status ${orderId}: finalStatus=${finalStatus || 'NONE'}, succeeded=${String(payload.succeeded)}, amount=${Number.isFinite(creditAmount) ? creditAmount : 'none'}, currency=${creditCurrency || 'none'}, hasRef=${hasGatewayRef}`
+    `[checkout] query-status ${orderId}: ${JSON.stringify({
+      checkoutRef: order.checkoutRef,
+      succeeded: payload.succeeded ?? null,
+      resultCode: payload.resultCode ?? null,
+      finalStatus: finalStatus || null,
+      finalStatusDesc: statusDesc || null,
+      credit: credit
+        ? {
+            bankRef: bankRef || null,
+            externalRef: externalRef || null,
+            paymentMethod: credit.paymentMethod || null,
+            amount: Number.isFinite(creditAmount) ? creditAmount : null,
+            currency: creditCurrency || null,
+            accountCurrency: credit.accountCurrency || null,
+            valueDate: credit.valueDate || null,
+          }
+        : null,
+      extraKeys: payload.data ? Object.keys(payload.data) : [],
+    })}`
   );
 
   if (finalStatus === 'SUCCESS') {
-    if (!credit || !Number.isFinite(creditAmount) || creditAmount <= 0 || !hasGatewayRef) {
+    if (!credit || !Number.isFinite(creditAmount) || creditAmount <= 0 || !hasValidBankRef) {
       console.warn(
-        `[checkout] Order ${orderId} returned finalStatus=SUCCESS without verified credit proof; keeping PENDING.`
+        `[checkout] Order ${orderId} returned finalStatus=SUCCESS without verified bankRef settlement proof (checkoutRef=${order.checkoutRef}, bankRef=${bankRef || 'none'}, externalRef=${externalRef || 'none'}); keeping PENDING.`
       );
       order.status = 'PENDING';
       order.statusDescription =
@@ -839,7 +876,7 @@ export async function queryAndSyncOrderStatus(orderId: string): Promise<OrderRec
       order.credit = {
         ...credit,
         amount: creditAmount,
-        bankRef: bankRef || undefined,
+        bankRef,
         externalRef: externalRef || undefined,
       };
     }
@@ -880,7 +917,7 @@ export function serializeOrderForClient(order: OrderRecord) {
     order.status === 'SUCCESS' &&
     Boolean(order.passCode) &&
     Boolean(order.hotelVoucherCode) &&
-    Boolean(order.credit && (order.credit.bankRef || order.credit.externalRef));
+    isValidBankRef(order.credit?.bankRef, order.checkoutRef);
 
   return {
     orderId: order.orderId,
