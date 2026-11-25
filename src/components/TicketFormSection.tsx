@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import QRCode from 'qrcode';
 import {
   AlertCircle,
@@ -21,8 +21,7 @@ import { EVENT_INFO, PROTEA_HOTEL_OFFER, TICKET_TIERS, formatUgx, type TicketTie
 import { useEventCountdown } from './EventCountdown';
 import { PartnersCarousel } from './PartnersCarousel';
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '');
-const apiUrl = (path: string) => `${API_BASE}${path}`;
+const apiUrl = (path: string) => path;
 
 type CheckoutStep = 'form' | 'awaiting_payment' | 'verifying' | 'failed' | 'confirmed';
 
@@ -133,6 +132,8 @@ export function TicketFormSection() {
   const [lookupOrderId, setLookupOrderId] = useState('');
   const [lookupError, setLookupError] = useState<string | null>(null);
   const [isLookingUp, setIsLookingUp] = useState(false);
+  const [sessionSecondsLeft, setSessionSecondsLeft] = useState(300);
+  const didTriggerExpiryReloadRef = useRef(false);
 
   const eventPhase = useEventCountdown();
   const isEventEnded = eventPhase.status === 'after';
@@ -305,6 +306,38 @@ export function TicketFormSection() {
     }, 4500);
     return () => window.clearInterval(intervalId);
   }, [step, activeOrderId, verifyOrderStatus]);
+
+  // 5-minute checkout session countdown with automatic page refresh on expiry
+  useEffect(() => {
+    if (step !== 'awaiting_payment' || !pendingCheckout) return;
+
+    didTriggerExpiryReloadRef.current = false;
+    const parsedExpiryMs = pendingCheckout.expiresAtUtc
+      ? Date.parse(pendingCheckout.expiresAtUtc)
+      : Number.NaN;
+    const maxDeadlineMs = Date.now() + 5 * 60 * 1000;
+    const deadlineMs = !Number.isNaN(parsedExpiryMs)
+      ? Math.min(parsedExpiryMs, maxDeadlineMs)
+      : maxDeadlineMs;
+
+    const triggerExpiryRefresh = () => {
+      if (didTriggerExpiryReloadRef.current || typeof window === 'undefined') return;
+      didTriggerExpiryReloadRef.current = true;
+      window.location.replace('https://thecourse.autoshowkampala.com/');
+    };
+
+    const updateRemaining = () => {
+      const remaining = Math.max(0, Math.ceil((deadlineMs - Date.now()) / 1000));
+      setSessionSecondsLeft(remaining);
+      if (remaining <= 0) {
+        triggerExpiryRefresh();
+      }
+    };
+
+    updateRemaining();
+    const timerId = window.setInterval(updateRemaining, 1000);
+    return () => window.clearInterval(timerId);
+  }, [step, pendingCheckout?.orderId, pendingCheckout?.expiresAtUtc]);
 
   useEffect(() => {
     let active = true;
@@ -599,6 +632,13 @@ export function TicketFormSection() {
     });
   };
 
+  const formatCountdown = (totalSeconds: number): string => {
+    const clamped = Math.max(0, totalSeconds);
+    const mins = Math.floor(clamped / 60);
+    const secs = clamped % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  };
+
   return (
     <section id="tickets" className="py-12 sm:py-14 border-t border-[#0E3B24]/10 bg-[#F3F0E7] print:bg-white print:border-0 print:py-4">
       <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8">
@@ -759,7 +799,7 @@ export function TicketFormSection() {
 
                     <div>
                       <label htmlFor="patron-email" className="block text-sm font-medium text-[#111D15] mb-1">
-                        Email <span className="text-[#111D15]/50 font-normal">(Optional)</span>
+                        Email <span className="text-[#111D15]/55 font-normal">(Required if need e-ticket via email)</span>
                       </label>
                       <input
                         id="patron-email"
@@ -1007,7 +1047,7 @@ export function TicketFormSection() {
                     </div>
                   )}
                   <p className="text-xs text-[#111D15]/65">
-                    Your Patron Pass, Gate QR Code, and Protea 50% voucher will be generated once payment settles.
+                    Your Patron Pass, Gate QR Code, and Protea 50% voucher will be generated once payment is settled.
                   </p>
                   {pendingCheckout.amountUgx > 0 && (
                     <div className="flex items-center justify-between gap-4 pt-2 border-t border-[#0E3B24]/10">
@@ -1017,11 +1057,15 @@ export function TicketFormSection() {
                       </span>
                     </div>
                   )}
-                  {formatUtcTime(pendingCheckout.expiresAtUtc) && (
-                    <p className="text-xs text-[#111D15]/60">
-                      Checkout session expires {formatUtcTime(pendingCheckout.expiresAtUtc)}
-                    </p>
-                  )}
+                  <div className="flex items-center justify-between gap-3 pt-1">
+                    <span className="text-xs text-[#111D15]/70">Checkout session expires in</span>
+                    <span
+                      aria-live="polite"
+                      className="inline-flex items-center font-mono tabular-nums text-xs font-semibold text-[#0E3B24] bg-white px-2.5 py-1 rounded-md border border-[#0E3B24]/20"
+                    >
+                      {formatCountdown(sessionSecondsLeft)}
+                    </span>
+                  </div>
                 </div>
 
                 {statusMessage && (
@@ -1149,6 +1193,11 @@ export function TicketFormSection() {
                       <p className="font-mono tabular-nums text-xs text-[#111D15]/65">
                         Ref: {receipt.bankRef}
                         {formatUtcTime(receipt.valueDate) ? ` · ${formatUtcTime(receipt.valueDate)}` : ''}
+                      </p>
+                    )}
+                    {receipt.email && (
+                      <p className="text-xs text-[#0E3B24]/80">
+                        Your PDF e-ticket copy is also being sent to {receipt.email}.
                       </p>
                     )}
                   </div>

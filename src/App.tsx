@@ -1,19 +1,22 @@
+import { useState } from 'react';
 import { ArrowDownRight, BedDouble, CalendarDays, Flag, MapPin } from 'lucide-react';
 import { AccordionGallery } from './components/AccordionGallery';
 import { EventCountdown } from './components/EventCountdown';
+import { HostPortalModal } from './components/HostPortalModal';
 import { ProteaStaySection } from './components/ProteaStaySection';
 import { TeaserVideoPlayer } from './components/TeaserVideoPlayer';
 import { TicketFormSection } from './components/TicketFormSection';
 import { EVENT_INFO, SIGNATURE_MOMENTS } from './data/eventData';
 
 export default function App() {
+  const [isHostPortalOpen, setIsHostPortalOpen] = useState(false);
   return (
     <div className="min-h-screen flex flex-col bg-[#FAF8F3] text-[#111D15]">
       {/* Strict 3-Zone Top Bar */}
       <header className="sticky top-0 z-40 bg-[#FAF8F3]/95 backdrop-blur-sm border-b border-[#0E3B24]/12 print:hidden">
         <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-8">
           <a
-            href="#top"
+            href="https://thecourse.autoshowkampala.com/"
             className="font-serif text-lg sm:text-xl font-bold tracking-tight text-[#0E3B24] whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#0E3B24]"
           >
             {EVENT_INFO.brand}
@@ -238,7 +241,7 @@ export default function App() {
       {/* Quiet Compact Footer */}
       <footer className="bg-[#0E3B24] text-[#FAF8F3] border-t border-[#C5A246]/25 print:hidden">
         <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-9">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-white/15">
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 pb-5 border-b border-white/15">
             <div>
               <p className="font-serif text-lg font-semibold text-white">
                 {EVENT_INFO.brand} — {EVENT_INFO.tagline}
@@ -248,14 +251,24 @@ export default function App() {
               </p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-white/85">
-              <span className="font-mono tabular-nums">{EVENT_INFO.phones.join(' · ')}</span>
-              <a
-                href={`mailto:${EVENT_INFO.email}`}
-                className="hover:text-[#E2CB7A] underline underline-offset-4 transition-colors"
+            <div className="flex items-end justify-between md:justify-end gap-6">
+              <div className="flex flex-col md:items-end gap-1 text-sm text-white/85">
+                <span className="font-mono tabular-nums">{EVENT_INFO.phones.join(' · ')}</span>
+                <a
+                  href={`mailto:${EVENT_INFO.email}`}
+                  className="hover:text-[#E2CB7A] underline underline-offset-4 transition-colors w-fit"
+                >
+                  {EVENT_INFO.email}
+                </a>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsHostPortalOpen(true)}
+                className="text-xs font-semibold text-[#E2CB7A] hover:text-white border border-[#E2CB7A]/40 hover:border-[#E2CB7A] rounded-md px-2.5 py-1 transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
-                {EVENT_INFO.email}
-              </a>
+                Host Login
+              </button>
             </div>
           </div>
 
@@ -278,6 +291,8 @@ export default function App() {
           </div>
         </div>
       </footer>
+
+      <HostPortalModal isOpen={isHostPortalOpen} onClose={() => setIsHostPortalOpen(false)} />
     </div>
   );
 }

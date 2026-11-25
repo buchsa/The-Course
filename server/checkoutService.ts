@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { EVENT_INFO, TICKET_TIERS, type TicketTier } from '../src/data/eventData.ts';
+import type { StaffRole } from './staffAuth.ts';
+import { sendTicketConfirmationEmail } from './ticketEmailService.ts';
 
 export interface RonfordApiEnvelope<T> {
   statusCode?: number;
@@ -69,6 +71,12 @@ export interface OrderRecord {
   status: OrderStatus;
   statusDescription?: string;
   credit?: PaymentCreditDetails;
+  checkedInAt?: number;
+  checkedInBy?: StaffRole;
+  paidAt?: number;
+  emailSentAt?: number;
+  emailSentTo?: string;
+  emailLastError?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -108,33 +116,77 @@ interface GatewayConfig {
 
 const REQUEST_TIMEOUT_MS = 20_000;
 const SESSION_EXPIRY_BUFFER_MS = 60_000;
-const ORDERS_DATA_DIR = path.resolve(process.cwd(), '.data');
+const CHECKOUT_SESSION_TTL_MS = 5 * 60 * 1000;
+const DEFAULT_DATA_DIR = path.resolve(process.cwd(), '.data');
+const CONFIGURED_DATA_DIR = (process.env.DATA_DIR || '').trim();
+const ORDERS_DATA_DIR = CONFIGURED_DATA_DIR ? path.resolve(CONFIGURED_DATA_DIR) : DEFAULT_DATA_DIR;
 const ORDERS_FILE_PATH = path.join(ORDERS_DATA_DIR, 'orders.json');
+const ORDERS_BACKUP_PATH = path.join(ORDERS_DATA_DIR, 'orders.backup.json');
+
+function resolveOrderExpiresAtUtc(createdAt: number, gatewayExpiresAtUtc?: string): string {
+  const localExpiryMs = createdAt + CHECKOUT_SESSION_TTL_MS;
+  const parsedGatewayMs = gatewayExpiresAtUtc ? Date.parse(gatewayExpiresAtUtc) : Number.NaN;
+  const effectiveMs =
+    !Number.isNaN(parsedGatewayMs) && parsedGatewayMs > createdAt
+      ? Math.min(localExpiryMs, parsedGatewayMs)
+      : localExpiryMs;
+  return new Date(effectiveMs).toISOString();
+}
 
 let cachedAuthSession: AuthSession | null = null;
 let inFlightAuthPromise: Promise<AuthSession> | null = null;
 
 const ordersById = new Map<string, OrderRecord>();
 const orderIdByCheckoutRef = new Map<string, string>();
+const orderIdByPassCode = new Map<string, string>();
+const inFlightEmailOrderIds = new Set<string>();
 
-function loadPersistedOrders(): void {
+function indexOrderRecord(record: OrderRecord): void {
+  ordersById.set(record.orderId, record);
+  orderIdByCheckoutRef.set(record.checkoutRef, record.orderId);
+  if (record.passCode) {
+    orderIdByPassCode.set(record.passCode.toUpperCase(), record.orderId);
+  }
+}
+
+function readOrderArrayFromFile(filePath: string): OrderRecord[] | null {
   try {
-    if (!fs.existsSync(ORDERS_FILE_PATH)) return;
-    const raw = fs.readFileSync(ORDERS_FILE_PATH, 'utf8');
-    if (!raw.trim()) return;
+    if (!fs.existsSync(filePath)) return null;
+    const raw = fs.readFileSync(filePath, 'utf8');
+    if (!raw.trim()) return null;
     const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return;
-
-    for (const item of parsed) {
-      if (
-        item &&
+    if (!Array.isArray(parsed)) return null;
+    return parsed.filter(
+      (item): item is OrderRecord =>
+        Boolean(item) &&
         typeof item === 'object' &&
         typeof (item as OrderRecord).orderId === 'string' &&
         typeof (item as OrderRecord).checkoutRef === 'string'
-      ) {
-        const record = item as OrderRecord;
-        ordersById.set(record.orderId, record);
-        orderIdByCheckoutRef.set(record.checkoutRef, record.orderId);
+    );
+  } catch {
+    return null;
+  }
+}
+
+function loadPersistedOrders(): void {
+  try {
+    const legacyPath = path.join(DEFAULT_DATA_DIR, 'orders.json');
+    const candidates = [
+      ORDERS_FILE_PATH,
+      ORDERS_BACKUP_PATH,
+      ...(ORDERS_FILE_PATH !== legacyPath ? [legacyPath] : []),
+    ];
+
+    for (const candidate of candidates) {
+      const records = readOrderArrayFromFile(candidate);
+      if (records && records.length > 0) {
+        for (const record of records) {
+          indexOrderRecord(record);
+        }
+        if (candidate !== ORDERS_FILE_PATH) {
+          savePersistedOrders();
+        }
+        return;
       }
     }
   } catch (err) {
@@ -145,9 +197,17 @@ function loadPersistedOrders(): void {
 function savePersistedOrders(): void {
   try {
     fs.mkdirSync(ORDERS_DATA_DIR, { recursive: true });
-    const allOrders = Array.from(ordersById.values()).slice(-500);
+    const allOrders = Array.from(ordersById.values());
+    const serialized = JSON.stringify(allOrders, null, 2);
+    if (fs.existsSync(ORDERS_FILE_PATH)) {
+      try {
+        fs.copyFileSync(ORDERS_FILE_PATH, ORDERS_BACKUP_PATH);
+      } catch {
+        // Ignore backup copy errors if primary does not exist yet
+      }
+    }
     const tempFile = `${ORDERS_FILE_PATH}.tmp`;
-    fs.writeFileSync(tempFile, JSON.stringify(allOrders, null, 2), 'utf8');
+    fs.writeFileSync(tempFile, serialized, 'utf8');
     fs.renameSync(tempFile, ORDERS_FILE_PATH);
   } catch (err) {
     console.warn('Unable to persist checkout orders:', err instanceof Error ? err.message : err);
@@ -260,6 +320,7 @@ async function callGatewayJson<T>(
     body?: unknown;
     bearerToken?: string;
     subscriptionKey?: string;
+    suppressWafLog?: boolean;
   }
 ): Promise<{
   httpStatus: number;
@@ -324,20 +385,35 @@ async function callGatewayJson<T>(
           .trim()
           .slice(0, 180)
       : undefined;
+  const isFrontDoorBlock =
+    !isJson &&
+    response.status === 403 &&
+    Boolean(rawSnippet?.toLowerCase().includes('the request is blocked'));
+
   if (!isJson) {
+    if (!(options.suppressWafLog && isFrontDoorBlock)) {
+      console.error(
+        `[checkout] Non-JSON response from ${endpointPath}: HTTP ${response.status} (ct=${contentType || 'unknown'}, server=${serverHeader || 'unknown'})`
+      );
+    }
+  } else if (response.status >= 400 || parsed.succeeded === false) {
     console.error(
-      `[checkout] Non-JSON response from ${endpointPath}: HTTP ${response.status} (ct=${contentType || 'unknown'}, server=${serverHeader || 'unknown'})`
+      `[checkout] Gateway error from ${endpointPath}: HTTP ${response.status} - ${extractApiError(parsed, 'Gateway returned an error')}`
     );
   }
 
   return { httpStatus: response.status, isJson, payload: parsed, serverHeader, contentType, rawSnippet };
 }
 
-async function retrieveInitData(apiBase: string, subscriptionKey?: string): Promise<InitDataPayload> {
+async function retrieveInitData(
+  apiBase: string,
+  subscriptionKey?: string,
+  suppressWafLog = false
+): Promise<InitDataPayload> {
   const { httpStatus, isJson, payload, rawSnippet } = await callGatewayJson<InitDataPayload>(
     apiBase,
     '/test/retrieve-init-data',
-    { method: 'GET', subscriptionKey }
+    { method: 'GET', subscriptionKey, suppressWafLog }
   );
 
   if (!isJson || httpStatus >= 400 || !payload.succeeded || !payload.data?.publicKey || !payload.data?.iv) {
@@ -347,9 +423,11 @@ async function retrieveInitData(apiBase: string, subscriptionKey?: string): Prom
       Boolean(rawSnippet?.toLowerCase().includes('the request is blocked'));
 
     if (isFrontDoorBlock) {
-      console.error(
-        `[checkout] Azure Front Door WAF blocked gateway request (${rawSnippet}). Ensure the hosting region/IP is allowed by the payment gateway.`
-      );
+      if (!suppressWafLog) {
+        console.error(
+          `[checkout] Azure Front Door WAF blocked gateway request (${rawSnippet}). Ensure the hosting region/IP is allowed by the payment gateway.`
+        );
+      }
       throw new CheckoutGatewayError(
         'The payment gateway firewall blocked the server connection (HTTP 403). Please confirm the Ronford API base URL and ensure your hosting server IP/region is allowlisted with Ronford Digital.',
         502,
@@ -446,7 +524,11 @@ function isSessionFresh(session: AuthSession | null): session is AuthSession {
   return expiryMs - Date.now() > SESSION_EXPIRY_BUFFER_MS;
 }
 
-async function authenticateMerchant(config: GatewayConfig, forceRefresh = false): Promise<AuthSession> {
+async function authenticateMerchant(
+  config: GatewayConfig,
+  forceRefresh = false,
+  suppressWafLog = false
+): Promise<AuthSession> {
   if (!forceRefresh && isSessionFresh(cachedAuthSession)) {
     return cachedAuthSession;
   }
@@ -456,7 +538,7 @@ async function authenticateMerchant(config: GatewayConfig, forceRefresh = false)
   }
 
   inFlightAuthPromise = (async () => {
-    const initData = await retrieveInitData(config.apiBase, config.subscriptionKey);
+    const initData = await retrieveInitData(config.apiBase, config.subscriptionKey, suppressWafLog);
     const authData = {
       merchantKey: config.merchantKey,
       timestamp: new Date().toISOString(),
@@ -526,13 +608,19 @@ export async function getPublicCheckoutConfig(): Promise<{
 
   try {
     const config = getGatewayConfig();
-    const session = await authenticateMerchant(config);
+    const session = await authenticateMerchant(config, false, true);
     return {
       configured: true,
       merchantName: session.merchantName,
       paymentMethods: Array.isArray(session.paymentMethods) ? session.paymentMethods : [],
     };
-  } catch {
+  } catch (err) {
+    if (!(err instanceof CheckoutGatewayError && err.code === 'GATEWAY_WAF_BLOCKED')) {
+      console.warn(
+        '[checkout] Failed to refresh public checkout config:',
+        err instanceof Error ? err.message : err
+      );
+    }
     return {
       configured: true,
       paymentMethods: [],
@@ -693,12 +781,13 @@ export async function initializeTicketCheckout(input: CreateCheckoutInput): Prom
     throw new CheckoutGatewayError('Payment gateway returned an invalid checkout URL.', 502);
   }
 
+  const createdAt = Date.now();
   const order: OrderRecord = {
     orderId,
     requestId,
     checkoutRef: payload.data.checkoutRef,
     checkoutUrl: validatedCheckoutUrl,
-    expiresAtUtc: payload.data.expiresAtUtc || '',
+    expiresAtUtc: resolveOrderExpiresAtUtc(createdAt, payload.data.expiresAtUtc),
     fullName: trimmedName,
     phone: formattedDisplayPhone,
     phoneDialCode: dialCode,
@@ -709,12 +798,11 @@ export async function initializeTicketCheckout(input: CreateCheckoutInput): Prom
     totalUgx,
     selectedMethodLabel,
     status: 'PENDING',
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    createdAt,
+    updatedAt: createdAt,
   };
 
-  ordersById.set(order.orderId, order);
-  orderIdByCheckoutRef.set(order.checkoutRef, order.orderId);
+  indexOrderRecord(order);
   savePersistedOrders();
 
   return {
@@ -755,6 +843,42 @@ function isValidBankRef(bankRef: string | undefined, checkoutRef: string): boole
   return true;
 }
 
+function dispatchTicketEmailIfNeeded(order: OrderRecord): void {
+  const recipient = (order.email || '').trim();
+  if (!recipient || order.emailSentAt || inFlightEmailOrderIds.has(order.orderId)) {
+    return;
+  }
+  if (getEffectiveOrderStatus(order) !== 'SUCCESS') {
+    return;
+  }
+
+  inFlightEmailOrderIds.add(order.orderId);
+  void sendTicketConfirmationEmail(order)
+    .then((result) => {
+      if (result.sent) {
+        order.emailSentAt = Date.now();
+        order.emailSentTo = result.recipient || recipient;
+        order.emailLastError = undefined;
+        order.updatedAt = Date.now();
+        indexOrderRecord(order);
+        savePersistedOrders();
+        console.info(`[checkout] Sent PDF e-ticket for ${order.orderId} to ${order.emailSentTo}`);
+      } else if (result.error) {
+        order.emailLastError = result.error;
+        savePersistedOrders();
+      }
+    })
+    .catch((err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[checkout] Failed sending PDF e-ticket for ${order.orderId}:`, message);
+      order.emailLastError = message;
+      savePersistedOrders();
+    })
+    .finally(() => {
+      inFlightEmailOrderIds.delete(order.orderId);
+    });
+}
+
 export async function queryAndSyncOrderStatus(orderId: string): Promise<OrderRecord> {
   const order = ordersById.get(orderId);
   if (!order) {
@@ -768,6 +892,7 @@ export async function queryAndSyncOrderStatus(orderId: string): Promise<OrderRec
     order.credit &&
     isValidBankRef(order.credit.bankRef, order.checkoutRef)
   ) {
+    dispatchTicketEmailIfNeeded(order);
     return order;
   }
 
@@ -873,6 +998,7 @@ export async function queryAndSyncOrderStatus(orderId: string): Promise<OrderRec
       }
       order.status = 'SUCCESS';
       order.statusDescription = statusDesc || 'Payment completed successfully';
+      order.paidAt = order.paidAt || Date.now();
       order.credit = {
         ...credit,
         amount: creditAmount,
@@ -888,8 +1014,23 @@ export async function queryAndSyncOrderStatus(orderId: string): Promise<OrderRec
     order.statusDescription = statusDesc || 'Awaiting payment confirmation';
   }
 
+  const parsedExpiryMs = order.expiresAtUtc ? Date.parse(order.expiresAtUtc) : Number.NaN;
+  const ttlExpiryMs = order.createdAt + CHECKOUT_SESSION_TTL_MS;
+  const effectiveExpiryMs = Number.isNaN(parsedExpiryMs)
+    ? ttlExpiryMs
+    : Math.min(parsedExpiryMs, ttlExpiryMs);
+
+  if (order.status === 'PENDING' && Date.now() >= effectiveExpiryMs) {
+    order.status = 'FAILED';
+    order.statusDescription = 'Checkout session expired after 5 minutes without completed payment.';
+  }
+
   order.updatedAt = Date.now();
+  indexOrderRecord(order);
   savePersistedOrders();
+  if (getEffectiveOrderStatus(order) === 'SUCCESS') {
+    dispatchTicketEmailIfNeeded(order);
+  }
   return order;
 }
 
@@ -942,5 +1083,475 @@ export function serializeOrderForClient(order: OrderRecord) {
           valueDate: order.credit?.valueDate,
         }
       : undefined,
+  };
+}
+
+export interface StaffOrderView {
+  orderId: string;
+  checkoutRef: string;
+  passCode?: string;
+  hotelVoucherCode?: string;
+  fullName: string;
+  phone?: string;
+  email: string;
+  tier: {
+    id: string;
+    name: string;
+    guestsIncluded: number;
+    priceUgx?: number;
+  };
+  quantity: number;
+  patronsAdmitted: number;
+  totalUgx?: number;
+  status: OrderStatus;
+  statusDescription?: string;
+  paymentMethod?: string;
+  bankRef?: string;
+  externalRef?: string;
+  creditAmount?: number;
+  valueDate?: string;
+  paidAt?: number;
+  dateOfPayment?: string | number;
+  checkedInAt?: number;
+  checkedInBy?: StaffRole;
+  emailSentAt?: number;
+  emailSentTo?: string;
+  emailLastError?: string;
+  createdAt: number;
+  updatedAt: number;
+  expiresAtUtc: string;
+}
+
+export interface StaffOrdersSummary {
+  totalOrders: number;
+  successOrders: number;
+  pendingOrders: number;
+  failedOrders: number;
+  checkedInOrders: number;
+  verifiedPasses: number;
+  verifiedPatrons: number;
+  totalCollectedUgx?: number;
+}
+
+export interface StaffOrdersFilterOptions {
+  status?: string;
+  search?: string;
+  tierId?: string;
+  checkIn?: string;
+  paymentMethod?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+function getEffectiveOrderStatus(order: OrderRecord): OrderStatus {
+  const isVerifiedPaid =
+    order.status === 'SUCCESS' &&
+    Boolean(order.passCode) &&
+    Boolean(order.hotelVoucherCode) &&
+    isValidBankRef(order.credit?.bankRef, order.checkoutRef);
+
+  if (isVerifiedPaid) return 'SUCCESS';
+  if (order.status === 'FAILED') return 'FAILED';
+  return 'PENDING';
+}
+
+function resolveDateOfPayment(order: OrderRecord, effectiveStatus: OrderStatus): string | number | undefined {
+  if (effectiveStatus !== 'SUCCESS') return undefined;
+  const rawValueDate = order.credit?.valueDate?.trim();
+  if (rawValueDate) {
+    // Prefer full timestamp when available, or fall back to paidAt if valueDate is date-only and paidAt exists
+    if (/^\d{4}-\d{2}-\d{2}$/.test(rawValueDate) && order.paidAt) {
+      return order.paidAt;
+    }
+    return rawValueDate;
+  }
+  return order.paidAt ?? order.updatedAt;
+}
+
+function getKampalaDateKey(value: string | number): string | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      return trimmed;
+    }
+    const parsed = Date.parse(trimmed);
+    if (Number.isNaN(parsed)) return null;
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Kampala' }).format(new Date(parsed));
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Kampala' }).format(new Date(value));
+  }
+  return null;
+}
+
+export function serializeOrderForStaff(order: OrderRecord, role: StaffRole): StaffOrderView {
+  const status = getEffectiveOrderStatus(order);
+  const patronsAdmitted = order.tier.guestsIncluded * order.quantity;
+  const paymentMethod = order.credit?.paymentMethod || order.selectedMethodLabel;
+  const resolvedPaidAt = status === 'SUCCESS' ? (order.paidAt ?? order.updatedAt) : undefined;
+  const dateOfPayment = resolveDateOfPayment(order, status);
+
+  const base: StaffOrderView = {
+    orderId: order.orderId,
+    checkoutRef: order.checkoutRef,
+    passCode: status === 'SUCCESS' ? order.passCode : undefined,
+    hotelVoucherCode: status === 'SUCCESS' ? order.hotelVoucherCode : undefined,
+    fullName: order.fullName,
+    email: order.email,
+    tier: {
+      id: order.tier.id,
+      name: order.tier.name,
+      guestsIncluded: order.tier.guestsIncluded,
+    },
+    quantity: order.quantity,
+    patronsAdmitted,
+    status,
+    statusDescription: order.statusDescription,
+    paymentMethod,
+    bankRef: order.credit?.bankRef,
+    externalRef: order.credit?.externalRef,
+    valueDate: order.credit?.valueDate,
+    paidAt: resolvedPaidAt,
+    dateOfPayment,
+    checkedInAt: order.checkedInAt,
+    checkedInBy: order.checkedInBy,
+    emailSentAt: order.emailSentAt,
+    emailSentTo: order.emailSentTo,
+    emailLastError: order.emailLastError,
+    createdAt: order.createdAt,
+    updatedAt: order.updatedAt,
+    expiresAtUtc: order.expiresAtUtc,
+  };
+
+  if (role === 'admin') {
+    base.phone = order.phone;
+    base.totalUgx = order.totalUgx;
+    base.tier.priceUgx = order.tier.priceUgx;
+    base.creditAmount = order.credit?.amount;
+  }
+
+  return base;
+}
+
+export function listOrdersForStaff(
+  role: StaffRole,
+  options?: StaffOrdersFilterOptions
+): {
+  summary: StaffOrdersSummary;
+  orders: StaffOrderView[];
+} {
+  const all = Array.from(ordersById.values()).sort((a, b) => b.createdAt - a.createdAt);
+
+  let successOrders = 0;
+  let pendingOrders = 0;
+  let failedOrders = 0;
+  let checkedInOrders = 0;
+  let verifiedPasses = 0;
+  let verifiedPatrons = 0;
+  let totalCollectedUgx = 0;
+
+  for (const order of all) {
+    const status = getEffectiveOrderStatus(order);
+    if (status === 'SUCCESS') {
+      successOrders += 1;
+      verifiedPasses += order.quantity;
+      verifiedPatrons += order.tier.guestsIncluded * order.quantity;
+      totalCollectedUgx += order.totalUgx;
+      if (order.checkedInAt) {
+        checkedInOrders += 1;
+      }
+    } else if (status === 'FAILED') {
+      failedOrders += 1;
+    } else {
+      pendingOrders += 1;
+    }
+  }
+
+  const statusFilter = (options?.status || 'ALL').trim().toUpperCase();
+  const tierFilter = (options?.tierId || 'ALL').trim().toLowerCase();
+  const checkInFilter = (options?.checkIn || 'ALL').trim().toUpperCase();
+  const methodFilter = (options?.paymentMethod || 'ALL').trim().toUpperCase();
+  const rawDateFrom = (options?.dateFrom || '').trim();
+  const rawDateTo = (options?.dateTo || '').trim();
+  const dateFrom = /^\d{4}-\d{2}-\d{2}$/.test(rawDateFrom) ? rawDateFrom : '';
+  const dateTo = /^\d{4}-\d{2}-\d{2}$/.test(rawDateTo) ? rawDateTo : '';
+  const query = (options?.search || '').trim().toLowerCase();
+
+  const filtered = all.filter((order) => {
+    const effectiveStatus = getEffectiveOrderStatus(order);
+    if (statusFilter !== 'ALL' && effectiveStatus !== statusFilter) {
+      return false;
+    }
+
+    if (tierFilter !== 'all' && order.tier.id.toLowerCase() !== tierFilter) {
+      return false;
+    }
+
+    if (checkInFilter === 'CHECKED_IN' && !order.checkedInAt) {
+      return false;
+    }
+    if (checkInFilter === 'NOT_CHECKED_IN' && Boolean(order.checkedInAt)) {
+      return false;
+    }
+
+    if (methodFilter !== 'ALL') {
+      const methodLabel = (order.credit?.paymentMethod || order.selectedMethodLabel || '').toUpperCase();
+      if (methodFilter === 'MTN') {
+        if (!methodLabel.includes('MTN')) return false;
+      } else if (methodFilter === 'AIRTEL') {
+        if (!methodLabel.includes('AIRTEL')) return false;
+      } else if (!methodLabel.includes(methodFilter)) {
+        return false;
+      }
+    }
+
+    if (dateFrom || dateTo) {
+      const dop = resolveDateOfPayment(order, effectiveStatus);
+      const targetDate = dop ?? order.createdAt;
+      const dayKey = getKampalaDateKey(targetDate);
+      if (!dayKey) return false;
+      if (dateFrom && dayKey < dateFrom) return false;
+      if (dateTo && dayKey > dateTo) return false;
+    }
+
+    if (!query) return true;
+
+    const searchableFields = [
+      order.orderId,
+      order.passCode || '',
+      order.hotelVoucherCode || '',
+      order.checkoutRef,
+      order.fullName,
+      order.email,
+      order.tier.name,
+      order.credit?.bankRef || '',
+      order.credit?.externalRef || '',
+      ...(role === 'admin' ? [order.phone, order.phoneNumber] : []),
+    ];
+
+    return searchableFields.some((value) => value.toLowerCase().includes(query));
+  });
+
+  const summary: StaffOrdersSummary = {
+    totalOrders: all.length,
+    successOrders,
+    pendingOrders,
+    failedOrders,
+    checkedInOrders,
+    verifiedPasses,
+    verifiedPatrons,
+  };
+
+  if (role === 'admin') {
+    summary.totalCollectedUgx = totalCollectedUgx;
+  }
+
+  return {
+    summary,
+    orders: filtered.map((order) => serializeOrderForStaff(order, role)),
+  };
+}
+
+function findOrderByLookupToken(rawInput: string): OrderRecord | null {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return null;
+
+  const candidates = new Set<string>();
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+      for (const key of ['passCode', 'ref', 'orderId', 'bankRef', 'checkoutRef']) {
+        const val = parsed[key];
+        if (typeof val === 'string' && val.trim()) {
+          candidates.add(val.trim());
+        }
+      }
+    } catch {
+      // Treat as plain text token if invalid JSON
+    }
+  }
+  candidates.add(trimmed);
+
+  for (const candidate of candidates) {
+    const upper = candidate.toUpperCase();
+    const byId = ordersById.get(upper);
+    if (byId) return byId;
+
+    const idFromPass = orderIdByPassCode.get(upper);
+    if (idFromPass) {
+      const found = ordersById.get(idFromPass);
+      if (found) return found;
+    }
+
+    const idFromCheckout = orderIdByCheckoutRef.get(candidate) || orderIdByCheckoutRef.get(upper);
+    if (idFromCheckout) {
+      const found = ordersById.get(idFromCheckout);
+      if (found) return found;
+    }
+
+    for (const order of ordersById.values()) {
+      if (
+        order.credit?.bankRef?.trim().toUpperCase() === upper ||
+        order.hotelVoucherCode?.trim().toUpperCase() === upper
+      ) {
+        return order;
+      }
+    }
+  }
+
+  return null;
+}
+
+export async function reverifyOrderForStaff(
+  orderId: string,
+  role: StaffRole
+): Promise<StaffOrderView> {
+  const normalized = orderId.trim().toUpperCase();
+  const synced = await queryAndSyncOrderStatus(normalized);
+  return serializeOrderForStaff(synced, role);
+}
+
+export async function verifyTicketForStaff(
+  rawInput: string,
+  role: StaffRole
+): Promise<{
+  found: boolean;
+  verificationState: 'VALID' | 'ALREADY_CHECKED_IN' | 'PENDING' | 'FAILED' | 'NOT_FOUND';
+  message: string;
+  order?: StaffOrderView;
+}> {
+  let order = findOrderByLookupToken(rawInput);
+  if (!order) {
+    return {
+      found: false,
+      verificationState: 'NOT_FOUND',
+      message: 'No ticket or checkout session matched that code.',
+    };
+  }
+
+  if (getEffectiveOrderStatus(order) === 'PENDING') {
+    try {
+      order = await queryAndSyncOrderStatus(order.orderId);
+    } catch {
+      // Keep local state if gateway cannot be reached from current environment
+    }
+  }
+
+  const effectiveStatus = getEffectiveOrderStatus(order);
+  const view = serializeOrderForStaff(order, role);
+
+  if (effectiveStatus === 'SUCCESS') {
+    if (order.checkedInAt) {
+      return {
+        found: true,
+        verificationState: 'ALREADY_CHECKED_IN',
+        message: 'This pass is settled and has already been checked in at the gate.',
+        order: view,
+      };
+    }
+    return {
+      found: true,
+      verificationState: 'VALID',
+      message: 'Payment settled and pass is valid for admission.',
+      order: view,
+    };
+  }
+
+  if (effectiveStatus === 'FAILED') {
+    return {
+      found: true,
+      verificationState: 'FAILED',
+      message: order.statusDescription || 'Payment failed or expired; pass is not valid for admission.',
+      order: view,
+    };
+  }
+
+  return {
+    found: true,
+    verificationState: 'PENDING',
+    message: order.statusDescription || 'Payment has not settled yet; do not admit.',
+    order: view,
+  };
+}
+
+export function checkInOrderForStaff(orderId: string, role: StaffRole): StaffOrderView {
+  const normalized = orderId.trim().toUpperCase();
+  const order = ordersById.get(normalized);
+  if (!order) {
+    throw new CheckoutGatewayError('Ticket reference was not found.', 404, 'ORDER_NOT_FOUND');
+  }
+
+  const effectiveStatus = getEffectiveOrderStatus(order);
+  if (effectiveStatus !== 'SUCCESS') {
+    throw new CheckoutGatewayError(
+      'Only settled (SUCCESS) passes can be checked in for admission.',
+      400,
+      'TICKET_NOT_SETTLED'
+    );
+  }
+
+  if (order.checkedInAt) {
+    throw new CheckoutGatewayError(
+      'This pass has already been checked in.',
+      409,
+      'ALREADY_CHECKED_IN'
+    );
+  }
+
+  order.checkedInAt = Date.now();
+  order.checkedInBy = role;
+  order.updatedAt = Date.now();
+  indexOrderRecord(order);
+  savePersistedOrders();
+  return serializeOrderForStaff(order, role);
+}
+
+export async function resendTicketEmailForStaff(
+  orderId: string,
+  role: StaffRole,
+  overrideEmail?: string
+): Promise<{
+  sent: boolean;
+  recipient?: string;
+  error?: string;
+  order: StaffOrderView;
+}> {
+  const normalized = orderId.trim().toUpperCase();
+  const order = ordersById.get(normalized);
+  if (!order) {
+    throw new CheckoutGatewayError('Order reference was not found.', 404, 'ORDER_NOT_FOUND');
+  }
+
+  if (getEffectiveOrderStatus(order) !== 'SUCCESS') {
+    throw new CheckoutGatewayError(
+      'E-tickets can only be emailed for settled (SUCCESS) passes.',
+      400,
+      'TICKET_NOT_SETTLED'
+    );
+  }
+
+  if (typeof overrideEmail === 'string' && overrideEmail.trim()) {
+    const cleaned = overrideEmail.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleaned) || /[\r\n]/.test(cleaned)) {
+      throw new CheckoutGatewayError('Please provide a valid email address.', 400, 'INVALID_EMAIL');
+    }
+    order.email = cleaned;
+  }
+
+  const result = await sendTicketConfirmationEmail(order);
+  if (result.sent) {
+    order.emailSentAt = Date.now();
+    order.emailSentTo = result.recipient;
+    order.emailLastError = undefined;
+  } else if (result.error) {
+    order.emailLastError = result.error;
+  }
+  order.updatedAt = Date.now();
+  indexOrderRecord(order);
+  savePersistedOrders();
+
+  return {
+    ...result,
+    order: serializeOrderForStaff(order, role),
   };
 }
