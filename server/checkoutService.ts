@@ -55,7 +55,8 @@ export interface OrderRecord {
   checkoutRef: string;
   checkoutUrl: string;
   expiresAtUtc: string;
-  hotelVoucherCode: string;
+  passCode?: string;
+  hotelVoucherCode?: string;
   fullName: string;
   phone: string;
   phoneDialCode: string;
@@ -584,7 +585,6 @@ export async function initializeTicketCheckout(input: CreateCheckoutInput): Prom
   const totalUgx = tier.priceUgx * input.quantity;
   const shortHex = crypto.randomBytes(3).toString('hex').toUpperCase();
   const orderId = `TC-2026-${shortHex}`;
-  const hotelVoucherCode = `PROTEA50-${shortHex}`;
   const requestId = crypto.randomUUID();
 
   let session = await authenticateMerchant(config);
@@ -699,7 +699,6 @@ export async function initializeTicketCheckout(input: CreateCheckoutInput): Prom
     checkoutRef: payload.data.checkoutRef,
     checkoutUrl: validatedCheckoutUrl,
     expiresAtUtc: payload.data.expiresAtUtc || '',
-    hotelVoucherCode,
     fullName: trimmedName,
     phone: formattedDisplayPhone,
     phoneDialCode: dialCode,
@@ -743,7 +742,13 @@ export async function queryAndSyncOrderStatus(orderId: string): Promise<OrderRec
     throw new CheckoutGatewayError('Order reference was not found or has expired.', 404, 'ORDER_NOT_FOUND');
   }
 
-  if (order.status === 'SUCCESS') {
+  if (
+    order.status === 'SUCCESS' &&
+    order.passCode &&
+    order.hotelVoucherCode &&
+    order.credit &&
+    (order.credit.bankRef || order.credit.externalRef)
+  ) {
     return order;
   }
 
@@ -778,27 +783,65 @@ export async function queryAndSyncOrderStatus(orderId: string): Promise<OrderRec
     queryCall = await executeQuery(session.sessionToken);
   }
 
-  const { httpStatus, payload } = queryCall;
-  if (httpStatus >= 400) {
+  const { httpStatus, isJson, payload } = queryCall;
+  if (!isJson || httpStatus >= 400 || payload.succeeded === false) {
     throw new CheckoutGatewayError(
-      extractApiError(payload, 'Unable to verify payment status with gateway.'),
+      extractApiError(isJson ? payload : null, 'Unable to verify payment status with gateway.'),
       httpStatus >= 400 && httpStatus < 500 ? httpStatus : 502
     );
   }
 
-  const finalStatus = payload.data?.status?.finalStatus?.toUpperCase();
+  const finalStatus = payload.data?.status?.finalStatus?.trim().toUpperCase();
   const statusDesc =
     payload.data?.status?.finalStatusDesc || payload.message || payload.resultDesc || undefined;
+  const credit = payload.data?.credit;
+  const rawCreditAmount = credit?.amount as unknown;
+  const creditAmount =
+    typeof rawCreditAmount === 'number'
+      ? rawCreditAmount
+      : typeof rawCreditAmount === 'string' && rawCreditAmount.trim() !== ''
+        ? Number(rawCreditAmount)
+        : Number.NaN;
+  const creditCurrency =
+    typeof credit?.currency === 'string' ? credit.currency.trim().toUpperCase() : '';
+  const bankRef = typeof credit?.bankRef === 'string' ? credit.bankRef.trim() : '';
+  const externalRef = typeof credit?.externalRef === 'string' ? credit.externalRef.trim() : '';
+  const hasGatewayRef = Boolean(bankRef || externalRef);
+
+  console.info(
+    `[checkout] query-status ${orderId}: finalStatus=${finalStatus || 'NONE'}, succeeded=${String(payload.succeeded)}, amount=${Number.isFinite(creditAmount) ? creditAmount : 'none'}, currency=${creditCurrency || 'none'}, hasRef=${hasGatewayRef}`
+  );
 
   if (finalStatus === 'SUCCESS') {
-    const creditAmount = payload.data?.credit?.amount;
-    if (typeof creditAmount === 'number' && creditAmount < order.totalUgx) {
+    if (!credit || !Number.isFinite(creditAmount) || creditAmount <= 0 || !hasGatewayRef) {
+      console.warn(
+        `[checkout] Order ${orderId} returned finalStatus=SUCCESS without verified credit proof; keeping PENDING.`
+      );
+      order.status = 'PENDING';
+      order.statusDescription =
+        'Payment confirmation is still processing. Complete Mobile Money approval and verify again.';
+    } else if (creditCurrency && creditCurrency !== 'UGX') {
+      order.status = 'FAILED';
+      order.statusDescription = 'Paid currency does not match UGX.';
+    } else if (creditAmount < order.totalUgx) {
       order.status = 'FAILED';
       order.statusDescription = 'Paid amount does not match required pass total.';
     } else {
+      const issuedHex = crypto.randomBytes(4).toString('hex').toUpperCase();
+      if (!order.hotelVoucherCode) {
+        order.hotelVoucherCode = `PROTEA50-${issuedHex}`;
+      }
+      if (!order.passCode) {
+        order.passCode = `TC26-PASS-${issuedHex}`;
+      }
       order.status = 'SUCCESS';
       order.statusDescription = statusDesc || 'Payment completed successfully';
-      order.credit = payload.data?.credit;
+      order.credit = {
+        ...credit,
+        amount: creditAmount,
+        bankRef: bankRef || undefined,
+        externalRef: externalRef || undefined,
+      };
     }
   } else if (finalStatus === 'FAILED' || finalStatus === 'CANCELLED' || finalStatus === 'EXPIRED') {
     order.status = 'FAILED';
@@ -833,28 +876,34 @@ export async function handleGatewayCallback(body: unknown): Promise<void> {
 }
 
 export function serializeOrderForClient(order: OrderRecord) {
+  const isVerifiedPaid =
+    order.status === 'SUCCESS' &&
+    Boolean(order.passCode) &&
+    Boolean(order.hotelVoucherCode) &&
+    Boolean(order.credit && (order.credit.bankRef || order.credit.externalRef));
+
   return {
     orderId: order.orderId,
-    status: order.status,
+    status: isVerifiedPaid ? 'SUCCESS' : order.status === 'FAILED' ? 'FAILED' : 'PENDING',
     statusDescription: order.statusDescription,
     checkoutUrl: order.status === 'PENDING' ? order.checkoutUrl : undefined,
     expiresAtUtc: order.expiresAtUtc,
-    receipt:
-      order.status === 'SUCCESS'
-        ? {
-            reference: order.orderId,
-            hotelVoucherCode: order.hotelVoucherCode,
-            fullName: order.fullName,
-            phone: order.phone,
-            email: order.email,
-            tier: order.tier,
-            quantity: order.quantity,
-            totalUgx: order.totalUgx,
-            paymentMethod: order.credit?.paymentMethod || order.selectedMethodLabel || 'Verified Checkout',
-            bankRef: order.credit?.bankRef,
-            externalRef: order.credit?.externalRef,
-            valueDate: order.credit?.valueDate,
-          }
-        : undefined,
+    receipt: isVerifiedPaid
+      ? {
+          reference: order.orderId,
+          passCode: order.passCode,
+          hotelVoucherCode: order.hotelVoucherCode,
+          fullName: order.fullName,
+          phone: order.phone,
+          email: order.email,
+          tier: order.tier,
+          quantity: order.quantity,
+          totalUgx: order.totalUgx,
+          paymentMethod: order.credit?.paymentMethod || order.selectedMethodLabel || 'Verified Checkout',
+          bankRef: order.credit?.bankRef,
+          externalRef: order.credit?.externalRef,
+          valueDate: order.credit?.valueDate,
+        }
+      : undefined,
   };
 }

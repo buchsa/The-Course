@@ -44,6 +44,7 @@ interface PendingCheckoutSession {
 
 interface BookingReceipt {
   reference: string;
+  passCode?: string;
   hotelVoucherCode: string;
   fullName: string;
   phone: string;
@@ -327,15 +328,17 @@ export function TicketFormSection() {
   }, [ticketFormUrl]);
 
   useEffect(() => {
-    if (!receipt) {
+    if (!receipt || step !== 'confirmed' || !(receipt.bankRef || receipt.externalRef)) {
       setPassQrDataUrl('');
       return;
     }
     let active = true;
     const payload = JSON.stringify({
+      passCode: receipt.passCode || receipt.reference,
       ref: receipt.reference,
       protea50: receipt.hotelVoucherCode,
       bankRef: receipt.bankRef,
+      externalRef: receipt.externalRef,
       event: 'The Course 2026',
       name: receipt.fullName,
       phone: receipt.phone,
@@ -360,7 +363,7 @@ export function TicketFormSection() {
     return () => {
       active = false;
     };
-  }, [receipt]);
+  }, [receipt, step]);
 
   const selectedCountry = useMemo(
     () => COUNTRY_OPTIONS.find((c) => c.iso === countryIso) ?? COUNTRY_OPTIONS[0],
@@ -988,7 +991,7 @@ export function TicketFormSection() {
 
                 <div className="p-4 rounded-xl bg-[#FAF8F3] border border-[#0E3B24]/12 space-y-2 text-sm">
                   <div className="flex items-center justify-between gap-4">
-                    <span className="text-xs font-medium text-[#0E3B24]/70">Order Reference</span>
+                    <span className="text-xs font-medium text-[#0E3B24]/70">Checkout Session</span>
                     <span className="font-mono tabular-nums text-xs font-semibold text-[#0E3B24]">
                       {pendingCheckout.orderId}
                     </span>
@@ -1003,10 +1006,9 @@ export function TicketFormSection() {
                       </span>
                     </div>
                   )}
-                  <div className="flex items-center justify-between gap-4 text-xs text-[#0E3B24]">
-                    <span>Protea Hotel Entebbe Double Occupancy</span>
-                    <span className="font-medium">50% Off Included</span>
-                  </div>
+                  <p className="text-xs text-[#111D15]/65">
+                    Your Patron Pass, Gate QR Code, and Protea 50% voucher will be generated once payment settles.
+                  </p>
                   {pendingCheckout.amountUgx > 0 && (
                     <div className="flex items-center justify-between gap-4 pt-2 border-t border-[#0E3B24]/10">
                       <span className="font-semibold text-[#0E3B24]">Total Due</span>
@@ -1126,7 +1128,7 @@ export function TicketFormSection() {
                     </h3>
                   </div>
                   <span className="font-mono tabular-nums text-sm font-semibold text-[#0E3B24] bg-[#FAF8F3] px-3 py-1 rounded-lg border border-[#0E3B24]/20">
-                    {receipt.reference}
+                    {receipt.passCode || receipt.reference}
                   </span>
                 </div>
 
