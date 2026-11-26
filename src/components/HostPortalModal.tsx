@@ -22,7 +22,7 @@ import { formatUgx } from '../data/eventData';
 
 const apiUrl = (path: string) => path;
 
-type StaffRole = 'admin' | 'accounts';
+type StaffRole = 'admin' | 'desk';
 type OrderStatusFilter = 'ALL' | 'SUCCESS' | 'PENDING' | 'FAILED';
 type TicketTypeFilter = 'ALL' | 'solo' | 'duo';
 type CheckInFilter = 'ALL' | 'CHECKED_IN' | 'NOT_CHECKED_IN';
@@ -132,7 +132,7 @@ export function HostPortalModal({ isOpen, onClose }: HostPortalModalProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [authConfig, setAuthConfig] = useState<{
     adminConfigured: boolean;
-    accountsConfigured: boolean;
+    deskConfigured: boolean;
   } | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
@@ -304,7 +304,7 @@ export function HostPortalModal({ isOpen, onClose }: HostPortalModalProps) {
       if (data.claimed) {
         setAuthConfig((prev) => ({
           adminConfigured: selectedRole === 'admin' ? true : prev?.adminConfigured ?? false,
-          accountsConfigured: selectedRole === 'accounts' ? true : prev?.accountsConfigured ?? false,
+          deskConfigured: selectedRole === 'desk' ? true : prev?.deskConfigured ?? false,
         }));
       }
     } catch {
@@ -694,8 +694,8 @@ export function HostPortalModal({ isOpen, onClose }: HostPortalModalProps) {
   const selectedRoleNeedsClaim =
     selectedRole === 'admin'
       ? authConfig?.adminConfigured === false
-      : selectedRole === 'accounts'
-        ? authConfig?.accountsConfigured === false
+      : selectedRole === 'desk'
+        ? authConfig?.deskConfigured === false
         : false;
 
   return (
@@ -719,7 +719,7 @@ export function HostPortalModal({ isOpen, onClose }: HostPortalModalProps) {
                 {session
                   ? session.role === 'admin'
                     ? 'Host Portal · Admin'
-                    : 'Host Portal · Accounts & Ticket Verification'
+                    : 'Host Portal · Desk & Ticket Verification'
                   : 'Host Login'}
               </h2>
               <p className="text-[11px] text-[#E2CB7A]/90">
@@ -783,19 +783,19 @@ export function HostPortalModal({ isOpen, onClose }: HostPortalModalProps) {
                 <button
                   type="button"
                   onClick={() => {
-                    setSelectedRole('accounts');
+                    setSelectedRole('desk');
                     setPassword('');
                     setLoginError(null);
                   }}
-                  aria-pressed={selectedRole === 'accounts'}
+                  aria-pressed={selectedRole === 'desk'}
                   className={`flex flex-col items-center justify-center gap-1.5 py-4 px-3 rounded-xl border text-center transition-colors cursor-pointer ${
-                    selectedRole === 'accounts'
+                    selectedRole === 'desk'
                       ? 'border-[#0E3B24] bg-[#0E3B24] text-[#FAF8F3]'
                       : 'border-[#0E3B24]/20 bg-white text-[#0E3B24] hover:border-[#0E3B24]/50'
                   }`}
                 >
                   <UserCheck className="w-5 h-5" aria-hidden="true" />
-                  <span className="text-sm font-semibold">Accounts</span>
+                  <span className="text-sm font-semibold">Desk</span>
                 </button>
               </div>
             </div>
@@ -807,7 +807,7 @@ export function HostPortalModal({ isOpen, onClose }: HostPortalModalProps) {
                     htmlFor="host-login-password"
                     className="block text-sm font-medium text-[#111D15] mb-1.5"
                   >
-                    {selectedRole === 'admin' ? 'Admin Password' : 'Accounts Password'}
+                    {selectedRole === 'admin' ? 'Admin Password' : 'Desk Password'}
                   </label>
                   <div className="relative">
                     <KeyRound
@@ -841,7 +841,7 @@ export function HostPortalModal({ isOpen, onClose }: HostPortalModalProps) {
                       No environment passcode detected yet. Enter a password (6+ characters) to set
                       the initial {selectedRole} passcode, or set{' '}
                       <span className="font-mono">
-                        {selectedRole === 'admin' ? 'ADMIN_PASSWORD' : 'ACCOUNTS_PASSWORD'}
+                        {selectedRole === 'admin' ? 'ADMIN_PASSWORD' : 'DESK_PASSWORD'}
                       </span>{' '}
                       in Hostinger environment variables.
                     </p>
@@ -865,14 +865,14 @@ export function HostPortalModal({ isOpen, onClose }: HostPortalModalProps) {
                 >
                   {isLoggingIn
                     ? 'Verifying...'
-                    : `Sign In as ${selectedRole === 'admin' ? 'Admin' : 'Accounts'}`}
+                    : `Sign In as ${selectedRole === 'admin' ? 'Admin' : 'Desk'}`}
                 </button>
               </form>
             )}
           </div>
         )}
 
-        {/* Authenticated Admin / Accounts Portal */}
+        {/* Authenticated Admin / Desk Portal */}
         {session && (
           <div className="p-4 sm:p-6 space-y-5 overflow-y-auto flex-1">
             {/* Summary Strip */}
@@ -926,7 +926,7 @@ export function HostPortalModal({ isOpen, onClose }: HostPortalModalProps) {
               </div>
             )}
 
-            {/* Ticket Verification Panel (Primary workflow for Accounts, also available to Admin) */}
+            {/* Ticket Verification Panel (Primary workflow for Desk, also available to Admin) */}
             <div className="bg-white rounded-2xl border border-[#0E3B24]/15 p-4 sm:p-5 space-y-3.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>

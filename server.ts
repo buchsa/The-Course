@@ -23,8 +23,8 @@ import {
   authenticateStaffRequest,
   checkLoginRateLimit,
   getStaffAuthStatus,
-  isValidStaffRole,
   issueStaffToken,
+  normalizeStaffRole,
   resetLoginRateLimit,
 } from './server/staffAuth.ts';
 
@@ -272,10 +272,10 @@ async function startServer() {
       return;
     }
 
-    const role = body.role;
+    const role = normalizeStaffRole(body.role);
     const password = typeof body.password === 'string' ? body.password : '';
-    if (!isValidStaffRole(role)) {
-      res.status(400).json({ error: 'Please choose either Admin or Accounts.' });
+    if (!role) {
+      res.status(400).json({ error: 'Please choose either Admin or Desk.' });
       return;
     }
 

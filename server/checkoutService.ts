@@ -1214,7 +1214,8 @@ export function serializeOrderForStaff(order: OrderRecord, role: StaffRole): Sta
     paidAt: resolvedPaidAt,
     dateOfPayment,
     checkedInAt: order.checkedInAt,
-    checkedInBy: order.checkedInBy,
+    checkedInBy:
+      (order.checkedInBy as string | undefined) === 'accounts' ? 'desk' : order.checkedInBy,
     emailSentAt: order.emailSentAt,
     emailSentTo: order.emailSentTo,
     emailLastError: order.emailLastError,

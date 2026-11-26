@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Request } from 'express';
 
-export type StaffRole = 'admin' | 'accounts';
+export type StaffRole = 'admin' | 'desk';
 
 interface StoredRoleCredential {
   salt: string;
@@ -13,6 +13,7 @@ interface StoredRoleCredential {
 
 interface StaffAuthStore {
   admin?: StoredRoleCredential;
+  desk?: StoredRoleCredential;
   accounts?: StoredRoleCredential;
 }
 
@@ -67,7 +68,13 @@ function getEnvPasswordForRole(role: StaffRole): string {
   if (role === 'admin') {
     return (process.env.ADMIN_PASSWORD || process.env.ADMIN_PASSCODE || '').trim();
   }
-  return (process.env.ACCOUNTS_PASSWORD || process.env.ACCOUNTS_PASSCODE || '').trim();
+  return (
+    process.env.DESK_PASSWORD ||
+    process.env.DESK_PASSCODE ||
+    process.env.ACCOUNTS_PASSWORD ||
+    process.env.ACCOUNTS_PASSCODE ||
+    ''
+  ).trim();
 }
 
 function timingSafeCompareStrings(a: string, b: string): boolean {
@@ -93,18 +100,26 @@ function verifyScryptPassword(password: string, stored: StoredRoleCredential): b
   }
 }
 
+export function normalizeStaffRole(value: unknown): StaffRole | null {
+  if (value === 'admin') return 'admin';
+  if (value === 'desk' || value === 'accounts') return 'desk';
+  return null;
+}
+
 export function isValidStaffRole(value: unknown): value is StaffRole {
-  return value === 'admin' || value === 'accounts';
+  return value === 'admin' || value === 'desk';
 }
 
 export function getStaffAuthStatus(): {
   adminConfigured: boolean;
-  accountsConfigured: boolean;
+  deskConfigured: boolean;
 } {
   const store = readAuthStore();
   return {
     adminConfigured: Boolean(getEnvPasswordForRole('admin') || store.admin?.hash),
-    accountsConfigured: Boolean(getEnvPasswordForRole('accounts') || store.accounts?.hash),
+    deskConfigured: Boolean(
+      getEnvPasswordForRole('desk') || store.desk?.hash || store.accounts?.hash
+    ),
   };
 }
 
@@ -153,7 +168,7 @@ export function authenticateOrClaimStaffPassword(
   // Fallback for preview environments where env passcodes are not set yet:
   // allow a one-time server-hashed claim per role and lock once claimed.
   const store = readAuthStore();
-  const existing = store[role];
+  const existing = role === 'desk' ? (store.desk ?? store.accounts) : store[role];
   if (existing?.hash) {
     if (!verifyScryptPassword(trimmed, existing)) {
       return { ok: false, error: 'Invalid password.', status: 401 };
@@ -220,8 +235,9 @@ export function verifyStaffToken(token: string): StaffSessionClaims | null {
     const decoded = JSON.parse(
       Buffer.from(encodedPayload, 'base64url').toString('utf8')
     ) as Partial<StaffSessionClaims>;
+    const normalizedRole = normalizeStaffRole(decoded.role);
     if (
-      !isValidStaffRole(decoded.role) ||
+      !normalizedRole ||
       typeof decoded.exp !== 'number' ||
       typeof decoded.iat !== 'number'
     ) {
@@ -230,7 +246,7 @@ export function verifyStaffToken(token: string): StaffSessionClaims | null {
     if (Date.now() >= decoded.exp) {
       return null;
     }
-    return { role: decoded.role, iat: decoded.iat, exp: decoded.exp };
+    return { role: normalizedRole, iat: decoded.iat, exp: decoded.exp };
   } catch {
     return null;
   }
