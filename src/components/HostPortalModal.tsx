@@ -18,6 +18,7 @@ import {
   X,
   XCircle,
 } from 'lucide-react';
+import jsQR from 'jsqr';
 import { formatUgx } from '../data/eventData';
 
 const apiUrl = (path: string) => path;
@@ -155,6 +156,9 @@ export function HostPortalModal({ isOpen, onClose }: HostPortalModalProps) {
   const [orders, setOrders] = useState<StaffOrderView[]>([]);
   const [isLoadingOrders, setIsLoadingOrders] = useState(false);
   const [portalError, setPortalError] = useState<string | null>(null);
+  const [emailNotice, setEmailNotice] = useState<string | null>(null);
+  const [emailModalOrder, setEmailModalOrder] = useState<StaffOrderView | null>(null);
+  const [emailRecipientInput, setEmailRecipientInput] = useState('');
   const [busyOrderId, setBusyOrderId] = useState<string | null>(null);
 
   // Ticket verification state
@@ -164,6 +168,7 @@ export function HostPortalModal({ isOpen, onClose }: HostPortalModalProps) {
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const [isScanningQr, setIsScanningQr] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const scanCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const scanTimerRef = useRef<number | null>(null);
 
@@ -349,6 +354,9 @@ export function HostPortalModal({ isOpen, onClose }: HostPortalModalProps) {
     setVerificationResult(null);
     setVerifyCode('');
     setPortalError(null);
+    setEmailNotice(null);
+    setEmailModalOrder(null);
+    setEmailRecipientInput('');
     handleClearFilters();
   };
 
@@ -480,11 +488,20 @@ export function HostPortalModal({ isOpen, onClose }: HostPortalModalProps) {
     }
   };
 
-  const handleResendEmail = async (orderId: string) => {
+  const handleOpenEmailOverride = (order: StaffOrderView) => {
+    setPortalError(null);
+    setEmailNotice(null);
+    setEmailModalOrder(order);
+    setEmailRecipientInput(order.email || '');
+  };
+
+  const handleResendEmail = async (orderId: string, overrideEmail?: string) => {
     if (!session) return;
     setBusyOrderId(orderId);
     setPortalError(null);
+    setEmailNotice(null);
     try {
+      const trimmedEmail = typeof overrideEmail === 'string' ? overrideEmail.trim() : '';
       const response = await fetch(
         apiUrl(`/api/staff/orders/${encodeURIComponent(orderId)}/resend-email`),
         {
@@ -493,7 +510,7 @@ export function HostPortalModal({ isOpen, onClose }: HostPortalModalProps) {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${session.token}`,
           },
-          body: JSON.stringify({}),
+          body: JSON.stringify(trimmedEmail ? { email: trimmedEmail } : {}),
         }
       );
       const rawText = await response.text();
@@ -512,6 +529,15 @@ export function HostPortalModal({ isOpen, onClose }: HostPortalModalProps) {
       }
       if (data.sent === false && typeof data.error === 'string') {
         setPortalError(data.error);
+      } else if (data.sent === true) {
+        const sentTo = typeof data.recipient === 'string' ? data.recipient : trimmedEmail;
+        setEmailNotice(
+          sentTo
+            ? `PDF e-ticket sent to ${sentTo} for ${orderId}.`
+            : `PDF e-ticket sent for ${orderId}.`
+        );
+        setEmailModalOrder(null);
+        setEmailRecipientInput('');
       }
       refreshActiveOrders(session.token);
     } catch {
@@ -521,10 +547,28 @@ export function HostPortalModal({ isOpen, onClose }: HostPortalModalProps) {
     }
   };
 
+  const handleSubmitEmailOverride = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!emailModalOrder) return;
+    const cleaned = emailRecipientInput.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleaned)) {
+      setPortalError('Please enter a valid recipient email address.');
+      return;
+    }
+    await handleResendEmail(emailModalOrder.orderId, cleaned);
+  };
+
   const handleStartQrScan = async () => {
     setVerifyError(null);
     if (isScanningQr) {
       stopQrScanner();
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setVerifyError(
+        'Camera access is unavailable in this browser context. Paste the QR text or type the Pass Code / Order ID instead.'
+      );
       return;
     }
 
@@ -536,42 +580,87 @@ export function HostPortalModal({ isOpen, onClose }: HostPortalModalProps) {
       }
     ).BarcodeDetector;
 
-    if (!DetectorCtor || !navigator.mediaDevices?.getUserMedia) {
-      setVerifyError(
-        'Camera QR scanning is not supported on this browser. Paste the QR text or type the Pass Code / Order ID instead.'
-      );
-      return;
-    }
-
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' },
+        video: { facingMode: { ideal: 'environment' } },
       });
       streamRef.current = stream;
       setIsScanningQr(true);
-      const detector = new DetectorCtor({ formats: ['qr_code'] });
+
+      let detector: { detect: (source: HTMLVideoElement) => Promise<Array<{ rawValue?: string }>> } | null = null;
+      if (DetectorCtor) {
+        try {
+          detector = new DetectorCtor({ formats: ['qr_code'] });
+        } catch {
+          detector = null;
+        }
+      }
+
+      if (!scanCanvasRef.current) {
+        scanCanvasRef.current = document.createElement('canvas');
+      }
 
       window.setTimeout(() => {
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          void videoRef.current.play();
+          void videoRef.current.play().catch(() => {
+            // Safari autoplay fallback handled by playsInline + muted
+          });
         }
       }, 50);
 
       scanTimerRef.current = window.setInterval(async () => {
-        if (!videoRef.current || videoRef.current.readyState < 2) return;
-        try {
-          const codes = await detector.detect(videoRef.current);
-          const raw = codes.find((c) => typeof c.rawValue === 'string' && c.rawValue.trim())?.rawValue;
-          if (raw) {
-            stopQrScanner();
-            setVerifyCode(raw);
-            void handleVerifyTicket(raw);
-          }
-        } catch {
-          // Ignore single frame detection error
+        const video = videoRef.current;
+        if (!video || video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) {
+          return;
         }
-      }, 350);
+
+        let detectedRaw: string | undefined;
+
+        if (detector) {
+          try {
+            const codes = await detector.detect(video);
+            detectedRaw = codes.find(
+              (c) => typeof c.rawValue === 'string' && c.rawValue.trim()
+            )?.rawValue;
+          } catch {
+            detector = null; // Fall back to jsQR if native detector fails
+          }
+        }
+
+        if (!detectedRaw) {
+          try {
+            const canvas = scanCanvasRef.current;
+            if (canvas) {
+              const maxSide = 640;
+              const scale = Math.min(1, maxSide / Math.max(video.videoWidth, video.videoHeight));
+              const w = Math.max(1, Math.round(video.videoWidth * scale));
+              const h = Math.max(1, Math.round(video.videoHeight * scale));
+              if (canvas.width !== w || canvas.height !== h) {
+                canvas.width = w;
+                canvas.height = h;
+              }
+              const ctx = canvas.getContext('2d', { willReadFrequently: true });
+              if (ctx) {
+                ctx.drawImage(video, 0, 0, w, h);
+                const imageData = ctx.getImageData(0, 0, w, h);
+                const decoded = jsQR(imageData.data, w, h, { inversionAttempts: 'attemptBoth' });
+                if (decoded?.data?.trim()) {
+                  detectedRaw = decoded.data.trim();
+                }
+              }
+            }
+          } catch {
+            // Ignore single frame decoding error
+          }
+        }
+
+        if (detectedRaw) {
+          stopQrScanner();
+          setVerifyCode(detectedRaw);
+          void handleVerifyTicket(detectedRaw);
+        }
+      }, 300);
     } catch {
       stopQrScanner();
       setVerifyError('Unable to access camera. Allow camera permission or type the Pass Code manually.');
@@ -951,7 +1040,7 @@ export function HostPortalModal({ isOpen, onClose }: HostPortalModalProps) {
 
               {isScanningQr && (
                 <div className="rounded-xl overflow-hidden border border-[#0E3B24]/20 bg-black max-w-sm">
-                  <video ref={videoRef} playsInline muted className="w-full h-48 object-cover" />
+                  <video ref={videoRef} playsInline muted autoPlay className="w-full h-48 object-cover" />
                 </div>
               )}
 
@@ -1235,6 +1324,73 @@ export function HostPortalModal({ isOpen, onClose }: HostPortalModalProps) {
               </div>
             )}
 
+            {emailNotice && (
+              <div
+                role="status"
+                className="flex items-center justify-between gap-2 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900"
+              >
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" aria-hidden="true" />
+                  <p>{emailNotice}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEmailNotice(null)}
+                  className="text-emerald-800 hover:text-emerald-950 font-semibold cursor-pointer"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+
+            {emailModalOrder && (
+              <form
+                onSubmit={(e) => void handleSubmitEmailOverride(e)}
+                className="bg-[#FAF8F3] rounded-2xl border border-[#0E3B24]/25 p-4 flex flex-col sm:flex-row sm:items-end gap-3"
+              >
+                <div className="flex-1 space-y-1">
+                  <label
+                    htmlFor="host-email-override"
+                    className="block text-xs font-semibold text-[#0E3B24]"
+                  >
+                    Send / Resend PDF E-Ticket — {emailModalOrder.fullName} ({emailModalOrder.orderId})
+                  </label>
+                  <input
+                    id="host-email-override"
+                    type="email"
+                    required
+                    autoFocus
+                    value={emailRecipientInput}
+                    onChange={(e) => setEmailRecipientInput(e.target.value)}
+                    placeholder="Enter patron email address (e.g. patron@example.com)"
+                    className="w-full h-9 px-3 rounded-lg border border-[#0E3B24]/25 bg-white text-xs text-[#111D15] focus:outline-none focus:border-[#0E3B24]"
+                  />
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="submit"
+                    disabled={busyOrderId === emailModalOrder.orderId}
+                    className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-[#0E3B24] hover:bg-[#134d30] text-white text-xs font-semibold cursor-pointer disabled:opacity-50"
+                  >
+                    <Mail className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>
+                      {busyOrderId === emailModalOrder.orderId ? 'Sending...' : 'Send PDF Pass'}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmailModalOrder(null);
+                      setEmailRecipientInput('');
+                    }}
+                    className="h-9 px-3 rounded-lg border border-[#0E3B24]/20 bg-white hover:bg-[#0E3B24]/5 text-xs font-medium text-[#0E3B24] cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+
             {/* Orders & Payments Table */}
             <div className="bg-white rounded-2xl border border-[#0E3B24]/15 overflow-hidden">
               <div className="overflow-x-auto">
@@ -1374,11 +1530,11 @@ export function HostPortalModal({ isOpen, onClose }: HostPortalModalProps) {
                                 <span>Admit</span>
                               </button>
                             )}
-                            {order.status === 'SUCCESS' && order.email && (
+                            {order.status === 'SUCCESS' && (
                               <button
                                 type="button"
                                 disabled={busyOrderId === order.orderId}
-                                onClick={() => void handleResendEmail(order.orderId)}
+                                onClick={() => handleOpenEmailOverride(order)}
                                 className="inline-flex items-center gap-1 h-7 px-2.5 rounded border border-[#0E3B24]/25 bg-white hover:bg-[#FAF8F3] text-[#0E3B24] text-[11px] font-medium cursor-pointer disabled:opacity-50 ml-1"
                               >
                                 <Mail className="w-3 h-3" aria-hidden="true" />

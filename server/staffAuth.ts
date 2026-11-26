@@ -15,6 +15,7 @@ interface StaffAuthStore {
   admin?: StoredRoleCredential;
   desk?: StoredRoleCredential;
   accounts?: StoredRoleCredential;
+  sessionSecret?: string;
 }
 
 export interface StaffSessionClaims {
@@ -26,9 +27,6 @@ export interface StaffSessionClaims {
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const MAX_LOGIN_ATTEMPTS = 12;
-
-const SESSION_SIGNING_SECRET =
-  (process.env.STAFF_SESSION_SECRET || '').trim() || crypto.randomBytes(32).toString('hex');
 
 const loginAttemptsByIp = new Map<string, { count: number; windowStart: number }>();
 
@@ -63,6 +61,27 @@ function writeAuthStore(store: StaffAuthStore): void {
   fs.writeFileSync(tempFile, JSON.stringify(store, null, 2), 'utf8');
   fs.renameSync(tempFile, filePath);
 }
+
+function resolveSessionSigningSecret(): string {
+  const envSecret = (process.env.STAFF_SESSION_SECRET || '').trim();
+  if (envSecret) return envSecret;
+
+  const store = readAuthStore();
+  if (typeof store.sessionSecret === 'string' && store.sessionSecret.trim().length >= 32) {
+    return store.sessionSecret.trim();
+  }
+
+  const generated = crypto.randomBytes(32).toString('hex');
+  try {
+    store.sessionSecret = generated;
+    writeAuthStore(store);
+  } catch {
+    // Fall back to in-memory secret if DATA_DIR is not writable
+  }
+  return generated;
+}
+
+const SESSION_SIGNING_SECRET = resolveSessionSigningSecret();
 
 function getEnvPasswordForRole(role: StaffRole): string {
   if (role === 'admin') {

@@ -1054,17 +1054,15 @@ export async function handleGatewayCallback(body: unknown): Promise<void> {
 }
 
 export function serializeOrderForClient(order: OrderRecord) {
-  const isVerifiedPaid =
-    order.status === 'SUCCESS' &&
-    Boolean(order.passCode) &&
-    Boolean(order.hotelVoucherCode) &&
-    isValidBankRef(order.credit?.bankRef, order.checkoutRef);
+  const effectiveStatus = getEffectiveOrderStatus(order);
+  const isVerifiedPaid = effectiveStatus === 'SUCCESS';
+  const statusDescription = resolveStatusDescription(order, effectiveStatus);
 
   return {
     orderId: order.orderId,
-    status: isVerifiedPaid ? 'SUCCESS' : order.status === 'FAILED' ? 'FAILED' : 'PENDING',
-    statusDescription: order.statusDescription,
-    checkoutUrl: order.status === 'PENDING' ? order.checkoutUrl : undefined,
+    status: effectiveStatus,
+    statusDescription,
+    checkoutUrl: effectiveStatus === 'PENDING' ? order.checkoutUrl : undefined,
     expiresAtUtc: order.expiresAtUtc,
     receipt: isVerifiedPaid
       ? {
@@ -1143,16 +1141,36 @@ export interface StaffOrdersFilterOptions {
   dateTo?: string;
 }
 
-function getEffectiveOrderStatus(order: OrderRecord): OrderStatus {
-  const isVerifiedPaid =
+function isVerifiedPaidOrder(order: OrderRecord): boolean {
+  return (
     order.status === 'SUCCESS' &&
     Boolean(order.passCode) &&
     Boolean(order.hotelVoucherCode) &&
-    isValidBankRef(order.credit?.bankRef, order.checkoutRef);
+    isValidBankRef(order.credit?.bankRef, order.checkoutRef)
+  );
+}
 
-  if (isVerifiedPaid) return 'SUCCESS';
+function isOrderSessionExpired(order: OrderRecord): boolean {
+  const parsedExpiryMs = order.expiresAtUtc ? Date.parse(order.expiresAtUtc) : Number.NaN;
+  const ttlExpiryMs = order.createdAt + CHECKOUT_SESSION_TTL_MS;
+  const effectiveExpiryMs = Number.isNaN(parsedExpiryMs)
+    ? ttlExpiryMs
+    : Math.min(parsedExpiryMs, ttlExpiryMs);
+  return Date.now() >= effectiveExpiryMs;
+}
+
+function getEffectiveOrderStatus(order: OrderRecord): OrderStatus {
+  if (isVerifiedPaidOrder(order)) return 'SUCCESS';
   if (order.status === 'FAILED') return 'FAILED';
+  if (isOrderSessionExpired(order)) return 'FAILED';
   return 'PENDING';
+}
+
+function resolveStatusDescription(order: OrderRecord, effectiveStatus: OrderStatus): string | undefined {
+  if (effectiveStatus === 'FAILED' && order.status === 'PENDING' && isOrderSessionExpired(order)) {
+    return 'Checkout session expired after 5 minutes without completed payment.';
+  }
+  return order.statusDescription;
 }
 
 function resolveDateOfPayment(order: OrderRecord, effectiveStatus: OrderStatus): string | number | undefined {
@@ -1190,6 +1208,7 @@ export function serializeOrderForStaff(order: OrderRecord, role: StaffRole): Sta
   const paymentMethod = order.credit?.paymentMethod || order.selectedMethodLabel;
   const resolvedPaidAt = status === 'SUCCESS' ? (order.paidAt ?? order.updatedAt) : undefined;
   const dateOfPayment = resolveDateOfPayment(order, status);
+  const statusDescription = resolveStatusDescription(order, status);
 
   const base: StaffOrderView = {
     orderId: order.orderId,
@@ -1206,7 +1225,7 @@ export function serializeOrderForStaff(order: OrderRecord, role: StaffRole): Sta
     quantity: order.quantity,
     patronsAdmitted,
     status,
-    statusDescription: order.statusDescription,
+    statusDescription,
     paymentMethod,
     bankRef: order.credit?.bankRef,
     externalRef: order.credit?.externalRef,
@@ -1430,7 +1449,7 @@ export async function verifyTicketForStaff(
     };
   }
 
-  if (getEffectiveOrderStatus(order) === 'PENDING') {
+  if (order.status === 'PENDING' && !isVerifiedPaidOrder(order)) {
     try {
       order = await queryAndSyncOrderStatus(order.orderId);
     } catch {
@@ -1462,7 +1481,9 @@ export async function verifyTicketForStaff(
     return {
       found: true,
       verificationState: 'FAILED',
-      message: order.statusDescription || 'Payment failed or expired; pass is not valid for admission.',
+      message:
+        resolveStatusDescription(order, effectiveStatus) ||
+        'Payment failed or expired; pass is not valid for admission.',
       order: view,
     };
   }
@@ -1537,6 +1558,11 @@ export async function resendTicketEmailForStaff(
       throw new CheckoutGatewayError('Please provide a valid email address.', 400, 'INVALID_EMAIL');
     }
     order.email = cleaned;
+  }
+
+  const finalEmail = (order.email || '').trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(finalEmail) || /[\r\n]/.test(finalEmail)) {
+    throw new CheckoutGatewayError('Please provide a valid email address.', 400, 'INVALID_EMAIL');
   }
 
   const result = await sendTicketConfirmationEmail(order);
